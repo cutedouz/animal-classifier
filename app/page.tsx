@@ -1046,7 +1046,7 @@ export default function Page() {
                       type="radio"
                       name={`evidence-${currentEvidence.id}`}
                       checked={evidenceAnswer === option}
-                      onChange={() => setEvidenceAnswer(option)}
+                      onChange={() => setEvidenceAnswer(option as PhylumOption)}
                     />
                     <span>{option}</span>
                   </label>
@@ -1149,7 +1149,7 @@ export default function Page() {
                           type="radio"
                           name={`compare-first-${currentCompare.id}`}
                           checked={compareFirstAnswer === option}
-                          onChange={() => setCompareFirstAnswer(option)}
+                          onChange={() => setCompareFirstAnswer(option as PhylumOption)}
                         />
                         <span>{option}</span>
                       </label>
@@ -1191,7 +1191,9 @@ export default function Page() {
                           alert('請先完成第一次作答。')
                           return
                         }
-                        setCompareFeedback(getCompareFeedback(currentCompare, compareFirstAnswer))
+                        setCompareFeedback(
+  getCompareFeedback(currentCompare, compareFirstAnswer as PhylumOption)
+)
                         setCompareMode('feedback')
                         setCompareFinalAnswer(compareFirstAnswer)
                         setCompareFinalSelectedFeatures(compareFirstSelectedFeatures)
@@ -1222,7 +1224,7 @@ export default function Page() {
                           type="radio"
                           name={`compare-final-${currentCompare.id}`}
                           checked={compareFinalAnswer === option}
-                          onChange={() => setCompareFinalAnswer(option)}
+                          onChange={() => setCompareFinalAnswer(option as PhylumOption)}
                         />
                         <span>{option}</span>
                       </label>
@@ -1327,7 +1329,7 @@ export default function Page() {
                       type="radio"
                       name={`transfer-${currentTransfer.id}`}
                       checked={transferAnswer === option}
-                      onChange={() => setTransferAnswer(option)}
+                      onChange={() => setTransferAnswer(option as PhylumOption)}
                     />
                     <span>{option}</span>
                   </label>
