@@ -1,980 +1,1454 @@
 'use client'
 
-import Image from 'next/image'
-import { type ReactNode, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  DndContext,
-  type DragEndEvent,
-  useDraggable,
-  useDroppable,
-} from '@dnd-kit/core'
-import { supabase } from '@/lib/supabase'
-import { evidenceQuestions, compareQuestions, transferQuestions } from '@/lib/questions'
-import { inferMisconception } from '@/lib/misconception'
-import { preclassifyCards } from '@/lib/preclassify'
+  PHYLUM_OPTIONS,
+  stage1Cards,
+  bridgeReflectQuestions,
+  bridgeFeatureChoices,
+  dichotomousKeyV1,
+  evidenceQuestions,
+  compareQuestions,
+  transferQuestions,
+  type PhylumOption,
+} from '../lib/questions'
 
-type AppPhase =
-  | 'start'
-  | 'preclassify'
+type AppStage =
+  | 'stage1'
+  | 'awareness'
+  | 'build'
   | 'evidence'
   | 'compare'
   | 'transfer'
-  | 'complete'
+  | 'done'
 
-type CompareStep = 'first_answer' | 'feedback' | 'final_answer'
-
-type PreclassifyGroup = {
+type StageGroup = {
   id: string
-  groupName: string
+  name: string
   reason: string
   cardIds: string[]
 }
 
-type DragContainerId = 'ungrouped' | string
-
-const UNGROUPED_ID = 'ungrouped'
-
-function makeGroupId() {
-  return `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+type DragPayload = {
+  cardId: string
+  source: 'bank' | 'group'
+  sourceGroupId?: string
 }
 
-function makeEmptyGroup(index: number): PreclassifyGroup {
-  return {
-    id: makeGroupId(),
-    groupName: `群組 ${index + 1}`,
-    reason: '',
-    cardIds: [],
+type EvidenceResponse = {
+  questionId: string
+  answer: PhylumOption
+  selectedFeatures: string[]
+  reasonText: string
+  confidence: number
+}
+
+type CompareResponse = {
+  questionId: string
+  firstAnswer: PhylumOption
+  firstSelectedFeatures: string[]
+  firstReasonText: string
+  firstConfidence: number
+  finalAnswer: PhylumOption
+  finalSelectedFeatures: string[]
+  finalReasonText: string
+  finalConfidence: number
+}
+
+type TransferResponse = {
+  questionId: string
+  answer: PhylumOption
+  selectedFeatures: string[]
+  reasonText: string
+  confidence: number
+}
+
+const REASON_FEATURE_OPTIONS = [
+  '放射對稱',
+  '口周有觸手',
+  '觸手有刺絲胞',
+  '身體扁平',
+  '身體柔軟不分節',
+  '身體分節',
+  '每節外形相似',
+  '有沒有殼',
+  '有吸盤',
+  '生活在水中',
+  '外形細長',
+  '會吸血／寄生',
+]
+
+const INITIAL_GROUPS: StageGroup[] = [
+  { id: 'G1', name: '群組 1', reason: '', cardIds: [] },
+  { id: 'G2', name: '群組 2', reason: '', cardIds: [] },
+]
+
+const KEY_SLOT_TARGETS: { id: string; label: string; result: PhylumOption }[] = [
+  { id: 'KS1', label: '第 1 個判斷節點', result: '刺絲胞動物門' },
+  { id: 'KS2', label: '第 2 個判斷節點', result: '環節動物門' },
+  { id: 'KS3', label: '第 3 個判斷節點', result: '扁形動物門' },
+  { id: 'KS4', label: '第 4 個判斷節點', result: '軟體動物門' },
+]
+
+function getCardName(cardId: string) {
+  return stage1Cards.find((card) => card.id === cardId)?.name ?? cardId
+}
+
+function getCardById(cardId: string) {
+  return stage1Cards.find((card) => card.id === cardId)
+}
+
+function getFeatureById(featureId: string) {
+  return bridgeFeatureChoices.find((feature) => feature.id === featureId)
+}
+
+function moveCardBetweenContainers(params: {
+  cardId: string
+  source: 'bank' | 'group'
+  sourceGroupId?: string
+  target: 'bank' | 'group'
+  targetGroupId?: string
+  bankIds: string[]
+  groups: StageGroup[]
+}) {
+  const { cardId, source, sourceGroupId, target, targetGroupId, bankIds, groups } = params
+
+  let nextBankIds = [...bankIds]
+  let nextGroups = groups.map((group) => ({ ...group, cardIds: [...group.cardIds] }))
+
+  if (source === 'bank') {
+    nextBankIds = nextBankIds.filter((id) => id !== cardId)
+  } else if (sourceGroupId) {
+    nextGroups = nextGroups.map((group) =>
+      group.id === sourceGroupId
+        ? { ...group, cardIds: group.cardIds.filter((id) => id !== cardId) }
+        : group
+    )
+  }
+
+  if (target === 'bank') {
+    if (!nextBankIds.includes(cardId)) nextBankIds.push(cardId)
+  } else if (targetGroupId) {
+    nextGroups = nextGroups.map((group) =>
+      group.id === targetGroupId && !group.cardIds.includes(cardId)
+        ? { ...group, cardIds: [...group.cardIds, cardId] }
+        : group
+    )
+  }
+
+  return { nextBankIds, nextGroups }
+}
+
+function featureMatchesCard(featureText: string, cardId: string): boolean {
+  const card = getCardById(cardId)
+  if (!card) return false
+
+  const joined = [...card.diagnosticFeatures, card.warning].join('｜')
+
+  switch (featureText) {
+    case '放射對稱':
+      return joined.includes('放射對稱')
+    case '口周有觸手':
+      return joined.includes('觸手')
+    case '觸手有刺絲胞':
+      return joined.includes('刺絲胞')
+    case '身體扁平':
+      return joined.includes('扁平')
+    case '身體柔軟不分節':
+      return joined.includes('柔軟不分節')
+    case '身體分節':
+      return joined.includes('分節')
+    case '有沒有殼':
+      return joined.includes('殼')
+    case '生活在水中':
+      return ['P1', 'P2', 'P3', 'P4', 'P7', 'P8', 'P10'].includes(cardId)
+    case '外形細長':
+      return ['P3', 'P4', 'P9', 'P10'].includes(cardId)
+    case '會不會吸血／寄生':
+      return ['P4', 'P10'].includes(cardId)
+    default:
+      return false
   }
 }
 
-function DraggableAnimalCard({
-  id,
-  name,
+function StepHeader({
+  stage,
+  setStage,
+}: {
+  stage: AppStage
+  setStage: (stage: AppStage) => void
+}) {
+  const items: { key: AppStage; label: string }[] = [
+    { key: 'stage1', label: '自由預分類' },
+    { key: 'awareness', label: '特徵覺察' },
+    { key: 'build', label: '規則建構' },
+    { key: 'evidence', label: '門別判定' },
+    { key: 'compare', label: '對比修正' },
+    { key: 'transfer', label: '遷移檢驗' },
+  ]
+
+  return (
+    <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="mb-2 text-sm font-semibold text-gray-700">流程</div>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item, index) => {
+          const active = stage === item.key
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setStage(item.key)}
+              className={`rounded-xl border px-3 py-2 text-sm ${
+                active
+                  ? 'border-black bg-black text-white'
+                  : 'border-gray-300 bg-white text-gray-700'
+              }`}
+            >
+              {index + 1}. {item.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function FeatureCheckboxes({
+  selected,
+  onChange,
+}: {
+  selected: string[]
+  onChange: (next: string[]) => void
+}) {
+  return (
+    <div className="grid gap-2 md:grid-cols-2">
+      {REASON_FEATURE_OPTIONS.map((feature) => {
+        const checked = selected.includes(feature)
+        return (
+          <label
+            key={feature}
+            className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm"
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  onChange([...selected, feature])
+                } else {
+                  onChange(selected.filter((item) => item !== feature))
+                }
+              }}
+              className="mt-1"
+            />
+            <span>{feature}</span>
+          </label>
+        )
+      })}
+    </div>
+  )
+}
+
+function QuestionCard({
+  title,
+  prompt,
+  stimulusText,
   imageUrl,
 }: {
-  id: string
-  name: string
-  imageUrl: string
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id,
-  })
-
-  const style = transform
-    ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-        touchAction: 'none' as const,
-      }
-    : { touchAction: 'none' as const }
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
-      className={`cursor-grab rounded-xl border bg-white p-3 shadow-sm transition ${
-        isDragging ? 'opacity-60' : ''
-      }`}
-    >
-      <div className="relative mb-3 h-36 w-full overflow-hidden rounded-lg bg-gray-100 sm:h-40">
-        <Image src={imageUrl} alt={name} fill className="object-contain p-2" />
-      </div>
-      <p className="text-sm font-semibold">{id}</p>
-      <p className="text-base leading-tight">{name}</p>
-    </div>
-  )
-}
-
-function DropContainer({
-  id,
-  title,
-  children,
-  gridClassName = 'grid-cols-2 md:grid-cols-3 xl:grid-cols-4',
-}: {
-  id: string
   title: string
-  children: ReactNode
-  gridClassName?: string
+  prompt: string
+  stimulusText: string
+  imageUrl: string | null
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id })
-
   return (
-    <div
-      ref={setNodeRef}
-      className={`rounded-2xl border p-4 ${
-        isOver ? 'border-black bg-gray-50' : 'border-gray-300 bg-white'
-      }`}
-    >
-      <h3 className="mb-3 text-lg font-semibold">{title}</h3>
-      <div className={`grid gap-3 ${gridClassName}`}>{children}</div>
+    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+      <div className="mb-2 text-sm font-semibold text-gray-500">{title}</div>
+      <div className="mb-3 text-xl font-bold text-gray-900">{prompt}</div>
+      <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+        {stimulusText}
+      </div>
+      {imageUrl ? (
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-3">
+          <img src={imageUrl} alt={prompt} className="h-56 w-full object-contain" />
+        </div>
+      ) : null}
     </div>
   )
 }
 
-export default function Home() {
-  const [participantCode, setParticipantCode] = useState('')
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [phase, setPhase] = useState<AppPhase>('start')
-  const [status, setStatus] = useState('')
+export default function Page() {
+  const [stage, setStage] = useState<AppStage>('stage1')
 
-  const [preclassifyGroups, setPreclassifyGroups] = useState<PreclassifyGroup[]>([
-    makeEmptyGroup(0),
-    makeEmptyGroup(1),
-  ])
-  const [ungroupedCardIds, setUngroupedCardIds] = useState<string[]>(
-    preclassifyCards.map((card) => card.id)
-  )
-  const [preclassifyOverallReason, setPreclassifyOverallReason] = useState('')
-  const [preclassifyEditCount, setPreclassifyEditCount] = useState(0)
+  // stage 1
+  const [participantCode] = useState('A001')
+  const [groups, setGroups] = useState<StageGroup[]>(INITIAL_GROUPS)
+  const [bankCardIds, setBankCardIds] = useState<string[]>(stage1Cards.map((card) => card.id))
+  const [overallReason, setOverallReason] = useState('')
   const [groupCreateCount, setGroupCreateCount] = useState(2)
   const [cardMoveCount, setCardMoveCount] = useState(0)
 
+  // stage 2 awareness
+  const [bridgeReflectAnswers, setBridgeReflectAnswers] = useState<Record<string, string[]>>({})
+  const [featureClassification, setFeatureClassification] = useState<
+    Record<string, 'diagnostic' | 'possible_but_unstable' | ''>
+  >({})
+
+  // stage 3 build
+  const [expandedCardId, setExpandedCardId] = useState<string>(stage1Cards[0]?.id ?? '')
+  const [studentKeySlots, setStudentKeySlots] = useState<(string | null)[]>([null, null, null, null])
+  const [selectedTestCardId, setSelectedTestCardId] = useState<string>(stage1Cards[0]?.id ?? '')
+
+  // stage 4 evidence
   const [evidenceIndex, setEvidenceIndex] = useState(0)
+  const [evidenceAnswer, setEvidenceAnswer] = useState<PhylumOption | ''>('')
+  const [evidenceSelectedFeatures, setEvidenceSelectedFeatures] = useState<string[]>([])
+  const [evidenceReasonText, setEvidenceReasonText] = useState('')
+  const [evidenceConfidence, setEvidenceConfidence] = useState(2)
+  const [evidenceResponses, setEvidenceResponses] = useState<EvidenceResponse[]>([])
+
+  // stage 5 compare
   const [compareIndex, setCompareIndex] = useState(0)
+  const [compareMode, setCompareMode] = useState<'first' | 'feedback'>('first')
+  const [compareFeedback, setCompareFeedback] = useState('')
+  const [compareFirstAnswer, setCompareFirstAnswer] = useState<PhylumOption | ''>('')
+  const [compareFirstSelectedFeatures, setCompareFirstSelectedFeatures] = useState<string[]>([])
+  const [compareFirstReasonText, setCompareFirstReasonText] = useState('')
+  const [compareFirstConfidence, setCompareFirstConfidence] = useState(2)
+  const [compareFinalAnswer, setCompareFinalAnswer] = useState<PhylumOption | ''>('')
+  const [compareFinalSelectedFeatures, setCompareFinalSelectedFeatures] = useState<string[]>([])
+  const [compareFinalReasonText, setCompareFinalReasonText] = useState('')
+  const [compareFinalConfidence, setCompareFinalConfidence] = useState(2)
+  const [compareResponses, setCompareResponses] = useState<CompareResponse[]>([])
+
+  // stage 6 transfer
   const [transferIndex, setTransferIndex] = useState(0)
-  const [compareStep, setCompareStep] = useState<CompareStep>('first_answer')
+  const [transferAnswer, setTransferAnswer] = useState<PhylumOption | ''>('')
+  const [transferSelectedFeatures, setTransferSelectedFeatures] = useState<string[]>([])
+  const [transferReasonText, setTransferReasonText] = useState('')
+  const [transferConfidence, setTransferConfidence] = useState(2)
+  const [transferResponses, setTransferResponses] = useState<TransferResponse[]>([])
 
-  const [answer, setAnswer] = useState('')
-  const [reason, setReason] = useState('')
-  const [confidence, setConfidence] = useState('3')
-  const [questionStartedAt, setQuestionStartedAt] = useState<number | null>(null)
+  const currentEvidence = evidenceQuestions[evidenceIndex]
+  const currentCompare = compareQuestions[compareIndex]
+  const currentTransfer = transferQuestions[transferIndex]
 
-  const [firstAnswer, setFirstAnswer] = useState('')
-  const [firstReason, setFirstReason] = useState('')
-  const [firstMisconceptionCode, setFirstMisconceptionCode] = useState<string | null>(null)
-  const [feedbackVariant, setFeedbackVariant] = useState('')
-  const [feedbackText, setFeedbackText] = useState('')
-
-  const currentEvidenceQuestion = evidenceQuestions[evidenceIndex]
-  const currentCompareQuestion = compareQuestions[compareIndex]
-  const currentTransferQuestion = transferQuestions[transferIndex]
-
-  const cardMap = useMemo(
-    () => Object.fromEntries(preclassifyCards.map((card) => [card.id, card])),
-    []
+  const usedStudentKeyFeatureIds = useMemo(
+    () => studentKeySlots.filter(Boolean) as string[],
+    [studentKeySlots]
   )
 
-  function addPreclassifyGroup() {
-    setPreclassifyGroups((prev) => [...prev, makeEmptyGroup(prev.length)])
-    setGroupCreateCount((prev) => prev + 1)
-    setPreclassifyEditCount((prev) => prev + 1)
-  }
+  const studentKeyTestResult = useMemo(() => {
+    for (let i = 0; i < studentKeySlots.length; i += 1) {
+      const featureId = studentKeySlots[i]
+      if (!featureId) continue
+      const feature = getFeatureById(featureId)
+      if (!feature) continue
+      if (featureMatchesCard(feature.text, selectedTestCardId)) {
+        return KEY_SLOT_TARGETS[i].result
+      }
+    }
+    return '未判定'
+  }, [studentKeySlots, selectedTestCardId])
 
-  function updatePreclassifyGroupName(groupId: string, value: string) {
-    setPreclassifyGroups((prev) =>
-      prev.map((group) =>
-        group.id === groupId ? { ...group, groupName: value } : group
-      )
-    )
-    setPreclassifyEditCount((prev) => prev + 1)
-  }
-
-  function updatePreclassifyGroupReason(groupId: string, value: string) {
-    setPreclassifyGroups((prev) =>
-      prev.map((group) =>
-        group.id === groupId ? { ...group, reason: value } : group
-      )
-    )
-    setPreclassifyEditCount((prev) => prev + 1)
-  }
-
-  function deleteEmptyGroup(groupId: string) {
-    setPreclassifyGroups((prev) => {
-      const target = prev.find((g) => g.id === groupId)
-      if (!target) return prev
-      if (target.cardIds.length > 0) return prev
-      return prev.filter((g) => g.id !== groupId)
+  function handleDropOnGroup(targetGroupId: string, payload: DragPayload) {
+    const { nextBankIds, nextGroups } = moveCardBetweenContainers({
+      cardId: payload.cardId,
+      source: payload.source,
+      sourceGroupId: payload.sourceGroupId,
+      target: 'group',
+      targetGroupId,
+      bankIds: bankCardIds,
+      groups,
     })
-    setPreclassifyEditCount((prev) => prev + 1)
+    setBankCardIds(nextBankIds)
+    setGroups(nextGroups)
+    setCardMoveCount((count) => count + 1)
   }
 
-  function findContainerOfCard(cardId: string): DragContainerId | null {
-    if (ungroupedCardIds.includes(cardId)) return UNGROUPED_ID
-    const group = preclassifyGroups.find((g) => g.cardIds.includes(cardId))
-    return group ? group.id : null
+  function handleDropOnBank(payload: DragPayload) {
+    const { nextBankIds, nextGroups } = moveCardBetweenContainers({
+      cardId: payload.cardId,
+      source: payload.source,
+      sourceGroupId: payload.sourceGroupId,
+      target: 'bank',
+      bankIds: bankCardIds,
+      groups,
+    })
+    setBankCardIds(nextBankIds)
+    setGroups(nextGroups)
+    setCardMoveCount((count) => count + 1)
   }
 
-  function moveCard(cardId: string, toContainerId: DragContainerId) {
-    const fromContainerId = findContainerOfCard(cardId)
-    if (!fromContainerId || fromContainerId === toContainerId) return
-
-    if (fromContainerId === UNGROUPED_ID) {
-      setUngroupedCardIds((prev) => prev.filter((id) => id !== cardId))
-    } else {
-      setPreclassifyGroups((prev) =>
-        prev.map((group) =>
-          group.id === fromContainerId
-            ? { ...group, cardIds: group.cardIds.filter((id) => id !== cardId) }
-            : group
-        )
-      )
-    }
-
-    if (toContainerId === UNGROUPED_ID) {
-      setUngroupedCardIds((prev) => [...prev, cardId])
-    } else {
-      setPreclassifyGroups((prev) =>
-        prev.map((group) =>
-          group.id === toContainerId
-            ? { ...group, cardIds: [...group.cardIds, cardId] }
-            : group
-        )
-      )
-    }
-
-    setCardMoveCount((prev) => prev + 1)
-    setPreclassifyEditCount((prev) => prev + 1)
+  function handleDropFeatureToSlot(slotIndex: number, featureId: string) {
+    setStudentKeySlots((prev) => {
+      const next = [...prev]
+      const existingIndex = next.findIndex((item) => item === featureId)
+      if (existingIndex !== -1) next[existingIndex] = null
+      next[slotIndex] = featureId
+      return next
+    })
   }
 
-  function handleDragEnd(event: DragEndEvent) {
-    const activeId = String(event.active.id)
-    const overId = event.over?.id ? String(event.over.id) : null
-    if (!overId) return
-
-    const isGroup = preclassifyGroups.some((g) => g.id === overId)
-    const targetContainerId: DragContainerId =
-      overId === UNGROUPED_ID
-        ? UNGROUPED_ID
-        : isGroup
-          ? overId
-          : findContainerOfCard(overId) ?? UNGROUPED_ID
-
-    moveCard(activeId, targetContainerId)
+  function resetEvidenceForm() {
+    setEvidenceAnswer('')
+    setEvidenceSelectedFeatures([])
+    setEvidenceReasonText('')
+    setEvidenceConfidence(2)
   }
 
-  async function handleStart() {
-    if (!participantCode.trim()) {
-      setStatus('請先輸入 participant code')
-      return
-    }
-
-    setStatus('starting...')
-
-    const { data: session, error } = await supabase
-      .from('sessions')
-      .insert([{ participant_code: participantCode.trim() }])
-      .select()
-      .single()
-
-    if (error) {
-      setStatus('session error: ' + error.message)
-      return
-    }
-
-    setSessionId(session.id)
-    setPhase('preclassify')
-    setStatus('')
+  function resetCompareForm() {
+    setCompareMode('first')
+    setCompareFeedback('')
+    setCompareFirstAnswer('')
+    setCompareFirstSelectedFeatures([])
+    setCompareFirstReasonText('')
+    setCompareFirstConfidence(2)
+    setCompareFinalAnswer('')
+    setCompareFinalSelectedFeatures([])
+    setCompareFinalReasonText('')
+    setCompareFinalConfidence(2)
   }
 
-  async function handlePreclassifySubmit() {
-    if (!sessionId) {
-      setStatus('session 尚未建立')
-      return
-    }
+  function resetTransferForm() {
+    setTransferAnswer('')
+    setTransferSelectedFeatures([])
+    setTransferReasonText('')
+    setTransferConfidence(2)
+  }
 
-    if (ungroupedCardIds.length > 0) {
-      setStatus('還有生物卡尚未分群')
-      return
-    }
+  function getCompareFeedback(question: (typeof compareQuestions)[number], answer: PhylumOption) {
+    if (answer === question.correctAnswer) return question.correctFeedback
+    const code = question.misconceptionMap[answer]
+    if (!code) return question.fallbackFeedback
+    return question.feedbackByCode[code] ?? question.fallbackFeedback
+  }
 
-    if (!preclassifyOverallReason.trim()) {
-      setStatus('請先填寫整體分類理由')
-      return
-    }
-
-    for (let i = 0; i < preclassifyGroups.length; i += 1) {
-      const group = preclassifyGroups[i]
-      if (!group.groupName.trim()) {
-        setStatus(`第 ${i + 1} 組尚未填寫群組名稱`)
-        return
-      }
-      if (group.cardIds.length === 0) {
-        setStatus(`第 ${i + 1} 組目前沒有生物卡`)
-        return
-      }
-      if (!group.reason.trim()) {
-        setStatus(`第 ${i + 1} 組尚未填寫分類理由`)
-        return
-      }
-    }
-
-    setStatus('saving preclassify...')
-
-    const { error: summaryError } = await supabase.from('preclassify_summary').insert([
-      {
-        session_id: sessionId,
-        group_count: preclassifyGroups.length,
-        edit_count: preclassifyEditCount,
-        overall_reason: preclassifyOverallReason.trim(),
+  const exportPayload = useMemo(
+    () => ({
+      participantCode,
+      stage1: {
+        groups,
+        bankCardIds,
+        overallReason,
+        groupCreateCount,
+        cardMoveCount,
       },
-    ])
-
-    if (summaryError) {
-      setStatus('preclassify summary error: ' + summaryError.message)
-      return
-    }
-
-    const groupRows = preclassifyGroups.map((group, index) => ({
-      session_id: sessionId,
-      group_no: index + 1,
-      group_name: group.groupName.trim(),
-      items_text: group.cardIds.join(', '),
-      reason: group.reason.trim(),
-    }))
-
-    const { error: groupsError } = await supabase
-      .from('preclassify_groups')
-      .insert(groupRows)
-
-    if (groupsError) {
-      setStatus('preclassify groups error: ' + groupsError.message)
-      return
-    }
-
-    setPhase('evidence')
-    setAnswer('')
-    setReason('')
-    setConfidence('3')
-    setQuestionStartedAt(Date.now())
-    setStatus('已完成第 1 階段，進入第 2 階段')
-  }
-
-  async function handleEvidenceSubmit() {
-    if (!sessionId) {
-      setStatus('session 尚未建立')
-      return
-    }
-    if (!answer) {
-      setStatus('請先選擇答案')
-      return
-    }
-    if (!reason.trim()) {
-      setStatus('請先填寫理由')
-      return
-    }
-    if (!questionStartedAt) {
-      setStatus('作答時間未初始化')
-      return
-    }
-
-    setStatus('saving...')
-
-    const durationMs = Date.now() - questionStartedAt
-    const isCorrect = answer === currentEvidenceQuestion.correctAnswer
-    const inference = inferMisconception(answer, reason, currentEvidenceQuestion)
-
-    const { error } = await supabase.from('responses').insert([
-      {
-        session_id: sessionId,
-        stage: currentEvidenceQuestion.stage,
-        item_id: currentEvidenceQuestion.id,
-        first_answer: answer,
-        final_answer: answer,
-        reason: reason.trim(),
-        first_reason: reason.trim(),
-        final_reason: reason.trim(),
-        duration_ms: durationMs,
-        confidence: Number(confidence),
-        is_correct: isCorrect,
-        misconception_code: inference.code,
-        representation_type: currentEvidenceQuestion.representationType,
-        target_feature: currentEvidenceQuestion.targetFeature,
-        coding_source: inference.source,
-        feedback_seen: false,
-        revised_after_feedback: false,
-        prompt_snapshot: currentEvidenceQuestion.prompt,
-        stimulus_snapshot: currentEvidenceQuestion.stimulusText ?? null,
-        compare_focus_snapshot: null,
-        feedback_text_snapshot: null,
-        first_misconception_code: inference.code,
-        final_misconception_code: inference.code,
-        feedback_variant: null,
+      awareness: {
+        bridgeReflectAnswers,
+        featureClassification,
       },
-    ])
-
-    if (error) {
-      setStatus('response error: ' + error.message)
-      return
-    }
-
-    const isLastEvidence = evidenceIndex === evidenceQuestions.length - 1
-
-    if (isLastEvidence) {
-      setPhase('compare')
-      setAnswer('')
-      setReason('')
-      setConfidence('3')
-      setQuestionStartedAt(Date.now())
-      setStatus('已進入第 3 階段：對比式回饋')
-      return
-    }
-
-    setEvidenceIndex((prev) => prev + 1)
-    setAnswer('')
-    setReason('')
-    setConfidence('3')
-    setQuestionStartedAt(Date.now())
-    setStatus('saved，已進入下一題')
-  }
-
-  function handleCompareFirstAnswerNext() {
-    if (!answer) {
-      setStatus('請先選擇首答答案')
-      return
-    }
-    if (!reason.trim()) {
-      setStatus('請先填寫首答理由')
-      return
-    }
-
-    const firstInference = inferMisconception(answer, reason, currentCompareQuestion)
-    const variant = firstInference.code ?? 'correct'
-    const routedFeedback =
-      firstInference.code === null
-        ? currentCompareQuestion.correctFeedback
-        : currentCompareQuestion.feedbackByCode[firstInference.code] ??
-          currentCompareQuestion.fallbackFeedback
-
-    setFirstAnswer(answer)
-    setFirstReason(reason.trim())
-    setFirstMisconceptionCode(firstInference.code)
-    setFeedbackVariant(variant)
-    setFeedbackText(routedFeedback)
-    setAnswer('')
-    setReason('')
-    setCompareStep('feedback')
-    setStatus('')
-  }
-
-  function handleCompareFeedbackNext() {
-    setCompareStep('final_answer')
-    setStatus('')
-  }
-
-  async function handleCompareFinalSubmit() {
-    if (!sessionId) {
-      setStatus('session 尚未建立')
-      return
-    }
-    if (!firstAnswer) {
-      setStatus('缺少首答資料')
-      return
-    }
-    if (!answer) {
-      setStatus('請先選擇改答答案')
-      return
-    }
-    if (!reason.trim()) {
-      setStatus('請先填寫改答理由')
-      return
-    }
-    if (!questionStartedAt) {
-      setStatus('作答時間未初始化')
-      return
-    }
-
-    setStatus('saving...')
-
-    const durationMs = Date.now() - questionStartedAt
-    const isCorrect = answer === currentCompareQuestion.correctAnswer
-    const finalInference = inferMisconception(answer, reason, currentCompareQuestion)
-    const revisedAfterFeedback = firstAnswer !== answer
-
-    const { error } = await supabase.from('responses').insert([
-      {
-        session_id: sessionId,
-        stage: currentCompareQuestion.stage,
-        item_id: currentCompareQuestion.id,
-        first_answer: firstAnswer,
-        final_answer: answer,
-        reason: reason.trim(),
-        first_reason: firstReason,
-        final_reason: reason.trim(),
-        duration_ms: durationMs,
-        confidence: Number(confidence),
-        is_correct: isCorrect,
-        misconception_code: finalInference.code,
-        representation_type: currentCompareQuestion.representationType,
-        target_feature: currentCompareQuestion.targetFeature,
-        coding_source: finalInference.source,
-        feedback_seen: true,
-        revised_after_feedback: revisedAfterFeedback,
-        prompt_snapshot: currentCompareQuestion.prompt,
-        stimulus_snapshot: currentCompareQuestion.stimulusText ?? null,
-        compare_focus_snapshot: currentCompareQuestion.compareFocus,
-        feedback_text_snapshot: feedbackText,
-        first_misconception_code: firstMisconceptionCode,
-        final_misconception_code: finalInference.code,
-        feedback_variant: feedbackVariant,
+      build: {
+        studentKeySlots,
+        selectedTestCardId,
+        studentKeyTestResult,
       },
-    ])
+      evidenceResponses,
+      compareResponses,
+      transferResponses,
+    }),
+    [
+      participantCode,
+      groups,
+      bankCardIds,
+      overallReason,
+      groupCreateCount,
+      cardMoveCount,
+      bridgeReflectAnswers,
+      featureClassification,
+      studentKeySlots,
+      selectedTestCardId,
+      studentKeyTestResult,
+      evidenceResponses,
+      compareResponses,
+      transferResponses,
+    ]
+  )
 
-    if (error) {
-      setStatus('response error: ' + error.message)
-      return
-    }
+  return (
+    <main className="min-h-screen bg-gray-50 px-4 py-6 md:px-8">
+      <div className="mx-auto max-w-7xl">
+        <h1 className="mb-2 text-4xl font-black tracking-tight text-gray-900">
+          動物分類學習網站
+        </h1>
+        <p className="mb-6 text-sm text-gray-600">
+          研究型 MVP｜主構念：依特徵進行動物門級分類
+        </p>
 
-    const isLastCompare = compareIndex === compareQuestions.length - 1
+        <StepHeader stage={stage} setStage={setStage} />
 
-    if (isLastCompare) {
-      setPhase('transfer')
-      setCompareStep('first_answer')
-      setFirstAnswer('')
-      setFirstReason('')
-      setFirstMisconceptionCode(null)
-      setFeedbackVariant('')
-      setFeedbackText('')
-      setAnswer('')
-      setReason('')
-      setConfidence('3')
-      setQuestionStartedAt(Date.now())
-      setStatus('已進入第 4 階段：遷移測驗')
-      return
-    }
+        {stage === 'stage1' && (
+          <section className="grid gap-6 lg:grid-cols-[1.8fr_1fr]">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-3xl font-black">第 1 階段：自由預分類</h2>
+                  <div className="mt-2 text-sm text-gray-600">participant code：{participantCode}</div>
+                </div>
+                <div className="grid gap-1 text-sm text-gray-600">
+                  <div>目前群組數：{groups.length}</div>
+                  <div>群組建立次數（含初始兩組）：{groupCreateCount}</div>
+                  <div>卡片移動次數：{cardMoveCount}</div>
+                </div>
+              </div>
 
-    setCompareIndex((prev) => prev + 1)
-    setCompareStep('first_answer')
-    setFirstAnswer('')
-    setFirstReason('')
-    setFirstMisconceptionCode(null)
-    setFeedbackVariant('')
-    setFeedbackText('')
-    setAnswer('')
-    setReason('')
-    setConfidence('3')
-    setQuestionStartedAt(Date.now())
-    setStatus('saved，已進入下一題')
-  }
+              <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+                請先自由分群。現在先不看標準答案，也先不給完整特徵表；先依你目前覺得合理的方式分類。
+              </div>
 
-  async function handleTransferSubmit() {
-    if (!sessionId) {
-      setStatus('session 尚未建立')
-      return
-    }
-    if (!answer) {
-      setStatus('請先選擇答案')
-      return
-    }
-    if (!reason.trim()) {
-      setStatus('請先填寫理由')
-      return
-    }
-    if (!questionStartedAt) {
-      setStatus('作答時間未初始化')
-      return
-    }
-
-    setStatus('saving...')
-
-    const durationMs = Date.now() - questionStartedAt
-    const isCorrect = answer === currentTransferQuestion.correctAnswer
-    const inference = inferMisconception(answer, reason, currentTransferQuestion)
-
-    const { error } = await supabase.from('responses').insert([
-      {
-        session_id: sessionId,
-        stage: currentTransferQuestion.stage,
-        item_id: currentTransferQuestion.id,
-        first_answer: answer,
-        final_answer: answer,
-        reason: reason.trim(),
-        first_reason: reason.trim(),
-        final_reason: reason.trim(),
-        duration_ms: durationMs,
-        confidence: Number(confidence),
-        is_correct: isCorrect,
-        misconception_code: inference.code,
-        representation_type: currentTransferQuestion.representationType,
-        target_feature: currentTransferQuestion.targetFeature,
-        coding_source: inference.source,
-        feedback_seen: false,
-        revised_after_feedback: false,
-        prompt_snapshot: currentTransferQuestion.prompt,
-        stimulus_snapshot: currentTransferQuestion.stimulusText ?? null,
-        compare_focus_snapshot: null,
-        feedback_text_snapshot: null,
-        first_misconception_code: inference.code,
-        final_misconception_code: inference.code,
-        feedback_variant: null,
-      },
-    ])
-
-    if (error) {
-      setStatus('response error: ' + error.message)
-      return
-    }
-
-    const isLastTransfer = transferIndex === transferQuestions.length - 1
-
-    if (isLastTransfer) {
-      setPhase('complete')
-      setStatus('saved')
-      return
-    }
-
-    setTransferIndex((prev) => prev + 1)
-    setAnswer('')
-    setReason('')
-    setConfidence('3')
-    setQuestionStartedAt(Date.now())
-    setStatus('saved，已進入下一題')
-  }
-
-  function renderOptions(options: string[]) {
-    return (
-      <div className="space-y-2">
-        {options.map((option) => (
-          <label key={option} className="flex items-center gap-2 rounded border p-3">
-            <input
-              type="radio"
-              name="answer"
-              value={option}
-              checked={answer === option}
-              onChange={(e) => setAnswer(e.target.value)}
-            />
-            <span>{option}</span>
-          </label>
-        ))}
-      </div>
-    )
-  }
-
-  function renderQuestionBlock(question: {
-    id: string
-    prompt: string
-    stimulusText?: string
-    imageUrl?: string | null
-    options: string[]
-    targetFeature: string
-  }) {
-    return (
-      <div className="space-y-4 rounded-xl border bg-white p-5">
-        <div className="space-y-2">
-          <p className="text-sm text-gray-500">題號：{question.id}</p>
-          <h2 className="text-xl font-semibold">{question.prompt}</h2>
-          {question.stimulusText ? <p className="text-gray-700">{question.stimulusText}</p> : null}
-          {question.imageUrl ? (
-            <div className="relative aspect-video w-full overflow-hidden rounded bg-gray-100">
-              <Image src={question.imageUrl} alt={question.prompt} fill className="object-contain" />
-            </div>
-          ) : null}
-        </div>
-
-        {renderOptions(question.options)}
-
-        <div className="space-y-2">
-          <label className="block text-sm font-medium">理由</label>
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="請寫出你的判斷理由"
-            className="min-h-28 w-full rounded border px-3 py-2"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="block text-sm font-medium">信心（1～5）</label>
-          <select
-            value={confidence}
-            onChange={(e) => setConfidence(e.target.value)}
-            className="rounded border px-3 py-2"
-          >
-            <option value="1">1 非常不確定</option>
-            <option value="2">2</option>
-            <option value="3">3 普通</option>
-            <option value="4">4</option>
-            <option value="5">5 非常確定</option>
-          </select>
-        </div>
-
-        <div className="rounded bg-gray-50 p-3 text-sm text-gray-700">
-          <span className="font-medium">研究者核心特徵：</span>
-          {question.targetFeature}
-        </div>
-      </div>
-    )
-  }
-
-  if (phase === 'start') {
-    return (
-      <main className="mx-auto w-full max-w-3xl space-y-6 p-6">
-        <header className="space-y-2">
-          <h1 className="text-3xl font-bold">動物分類學習網站 MVP</h1>
-          <p className="text-gray-700">
-            目前版本：第 1 階段預分類（拖曳圖片版）＋ 第 2 階段證據分類 ＋ 第 3 階段對比式回饋 ＋ 第 4 階段遷移測驗
-          </p>
-        </header>
-
-        <section className="space-y-3 rounded-xl border bg-white p-5">
-          <label className="block text-sm font-medium">Participant Code</label>
-          <input
-            value={participantCode}
-            onChange={(e) => setParticipantCode(e.target.value)}
-            placeholder="例如：A001"
-            className="w-full rounded border px-3 py-2"
-          />
-          <button
-            onClick={handleStart}
-            className="rounded bg-black px-4 py-2 text-white"
-          >
-            開始作答
-          </button>
-          <p>{status}</p>
-        </section>
-      </main>
-    )
-  }
-
-  if (phase === 'preclassify') {
-    return (
-      <main className="mx-auto w-full max-w-[1700px] space-y-6 px-6 py-6 2xl:px-10">
-        <header className="space-y-3">
-          <h1 className="text-3xl font-bold">第 1 階段：預分類（拖曳圖片版）</h1>
-
-          <div className="grid gap-1 text-sm text-gray-600 md:grid-cols-2 xl:grid-cols-3">
-            <p>participant code：{participantCode}</p>
-            <p>請先自由分群，不先看標準答案。</p>
-            <p>目前修改次數近似值：{preclassifyEditCount}</p>
-            <p>目前群組數：{preclassifyGroups.length}</p>
-            <p>群組建立次數（含初始兩組）：{groupCreateCount}</p>
-            <p>卡片移動次數：{cardMoveCount}</p>
-          </div>
-        </header>
-
-        <DndContext onDragEnd={handleDragEnd}>
-          <section className="grid gap-6 2xl:grid-cols-[minmax(0,1.7fr)_460px] xl:grid-cols-[minmax(0,1.45fr)_420px]">
-            <div className="min-w-0 space-y-6">
-              <DropContainer
-                id={UNGROUPED_ID}
-                title="待分類生物卡"
-                gridClassName="grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5"
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const payloadRaw = e.dataTransfer.getData('application/json')
+                  if (!payloadRaw) return
+                  handleDropOnBank(JSON.parse(payloadRaw) as DragPayload)
+                }}
+                className="rounded-2xl border border-gray-200 p-4"
               >
-                {ungroupedCardIds.map((cardId) => {
-                  const card = cardMap[cardId]
-                  return (
-                    <DraggableAnimalCard
-                      key={card.id}
-                      id={card.id}
-                      name={card.name}
-                      imageUrl={card.imageUrl}
-                    />
-                  )
-                })}
-              </DropContainer>
+                <div className="mb-3 text-xl font-bold">待分類生物卡</div>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                  {bankCardIds.map((cardId) => {
+                    const card = getCardById(cardId)
+                    if (!card) return null
+                    return (
+                      <div
+                        key={card.id}
+                        draggable
+                        onDragStart={(e) => {
+                          const payload: DragPayload = { cardId: card.id, source: 'bank' }
+                          e.dataTransfer.setData('application/json', JSON.stringify(payload))
+                        }}
+                        className="cursor-move rounded-2xl border border-gray-300 bg-white p-3"
+                      >
+                        <div className="mb-3 overflow-hidden rounded-xl border border-gray-200 bg-gray-50 p-2">
+                          <img
+                            src={card.imageUrl}
+                            alt={card.name}
+                            className="h-44 w-full object-contain"
+                          />
+                        </div>
+                        <div className="text-sm font-semibold text-gray-500">{card.id}</div>
+                        <div className="text-xl font-bold">{card.name}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
 
-            <aside className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">你的群組</h2>
+            <aside className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-2xl font-black">你的群組</h2>
                 <button
-                  onClick={addPreclassifyGroup}
-                  className="rounded border px-3 py-2 text-sm"
+                  type="button"
+                  onClick={() => {
+                    const nextIndex = groups.length + 1
+                    setGroups((prev) => [
+                      ...prev,
+                      {
+                        id: `G${Date.now()}`,
+                        name: `群組 ${nextIndex}`,
+                        reason: '',
+                        cardIds: [],
+                      },
+                    ])
+                    setGroupCreateCount((count) => count + 1)
+                  }}
+                  className="rounded-xl border border-gray-300 px-3 py-2 text-sm font-semibold"
                 >
                   新增群組
                 </button>
               </div>
 
               <div className="space-y-4">
-                {preclassifyGroups.map((group, index) => (
-                  <div key={group.id} className="space-y-3 rounded-2xl border bg-white p-4">
-                    <div className="flex items-start gap-3">
+                {groups.map((group, groupIndex) => (
+                  <div key={group.id} className="rounded-2xl border border-gray-300 p-4">
+                    <div className="mb-3 flex items-center gap-2">
                       <input
-                        value={group.groupName}
-                        onChange={(e) =>
-                          updatePreclassifyGroupName(group.id, e.target.value)
-                        }
-                        className="w-full rounded border px-3 py-2"
+                        value={group.name}
+                        onChange={(e) => {
+                          const nextName = e.target.value
+                          setGroups((prev) =>
+                            prev.map((item) =>
+                              item.id === group.id ? { ...item, name: nextName } : item
+                            )
+                          )
+                        }}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2"
                       />
                       <button
-                        onClick={() => deleteEmptyGroup(group.id)}
-                        className="shrink-0 rounded border px-3 py-2 text-sm"
+                        type="button"
+                        disabled={group.cardIds.length > 0}
+                        onClick={() => {
+                          setGroups((prev) => prev.filter((item) => item.id !== group.id))
+                        }}
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-40"
                       >
                         刪除空組
                       </button>
                     </div>
 
-                    <p className="text-sm text-gray-500">第 {index + 1} 組</p>
+                    <div className="mb-2 text-sm text-gray-500">第 {groupIndex + 1} 組</div>
 
-                    <DropContainer
-                      id={group.id}
-                      title="拖曳卡片到這一組"
-                      gridClassName="grid-cols-2"
+                    <div
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        const payloadRaw = e.dataTransfer.getData('application/json')
+                        if (!payloadRaw) return
+                        handleDropOnGroup(group.id, JSON.parse(payloadRaw) as DragPayload)
+                      }}
+                      className="mb-3 min-h-[120px] rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-3"
                     >
-                      {group.cardIds.map((cardId) => {
-                        const card = cardMap[cardId]
-                        return (
-                          <DraggableAnimalCard
-                            key={card.id}
-                            id={card.id}
-                            name={card.name}
-                            imageUrl={card.imageUrl}
-                          />
-                        )
-                      })}
-                    </DropContainer>
-
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium">這組的分類理由</label>
-                      <textarea
-                        value={group.reason}
-                        onChange={(e) =>
-                          updatePreclassifyGroupReason(group.id, e.target.value)
-                        }
-                        placeholder="請說明你為什麼把這些生物分在一起"
-                        className="min-h-24 w-full rounded border px-3 py-2"
-                      />
+                      {group.cardIds.length === 0 ? (
+                        <div className="text-lg font-bold text-gray-500">拖曳卡片到這一組</div>
+                      ) : (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {group.cardIds.map((cardId) => {
+                            const card = getCardById(cardId)
+                            if (!card) return null
+                            return (
+                              <div
+                                key={card.id}
+                                draggable
+                                onDragStart={(e) => {
+                                  const payload: DragPayload = {
+                                    cardId: card.id,
+                                    source: 'group',
+                                    sourceGroupId: group.id,
+                                  }
+                                  e.dataTransfer.setData(
+                                    'application/json',
+                                    JSON.stringify(payload)
+                                  )
+                                }}
+                                className="cursor-move rounded-xl border border-gray-300 bg-white p-2"
+                              >
+                                <div className="mb-2 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 p-2">
+                                  <img
+                                    src={card.imageUrl}
+                                    alt={card.name}
+                                    className="h-24 w-full object-contain"
+                                  />
+                                </div>
+                                <div className="text-sm font-semibold text-gray-500">{card.id}</div>
+                                <div className="font-bold">{card.name}</div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
+
+                    <div className="mb-2 text-sm font-semibold text-gray-700">這組的分類理由</div>
+                    <textarea
+                      value={group.reason}
+                      onChange={(e) => {
+                        const nextReason = e.target.value
+                        setGroups((prev) =>
+                          prev.map((item) =>
+                            item.id === group.id ? { ...item, reason: nextReason } : item
+                          )
+                        )
+                      }}
+                      placeholder="請說明你為什麼把這些生物分在一起"
+                      className="min-h-[96px] w-full rounded-xl border border-gray-300 px-3 py-2"
+                    />
                   </div>
                 ))}
               </div>
 
-              <div className="space-y-2 rounded-2xl border bg-white p-4">
-                <label className="block text-sm font-medium">整體分類理由</label>
+              <div className="mt-5 rounded-2xl border border-gray-300 p-4">
+                <div className="mb-2 text-lg font-black">整體分類理由</div>
                 <textarea
-                  value={preclassifyOverallReason}
-                  onChange={(e) => {
-                    setPreclassifyOverallReason(e.target.value)
-                    setPreclassifyEditCount((prev) => prev + 1)
-                  }}
-                  placeholder="請說明你整體上是依什麼規則分群"
-                  className="min-h-28 w-full rounded border px-3 py-2"
+                  value={overallReason}
+                  onChange={(e) => setOverallReason(e.target.value)}
+                  placeholder="請說明你整體分類時最常用的依據"
+                  className="min-h-[120px] w-full rounded-xl border border-gray-300 px-3 py-2"
                 />
               </div>
 
-              <button
-                onClick={handlePreclassifySubmit}
-                className="w-full rounded bg-black px-4 py-3 text-white"
-              >
-                送出第 1 階段，進入第 2 階段
-              </button>
-
-              <p>{status}</p>
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setStage('awareness')}
+                  className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+                >
+                  進入階段 2
+                </button>
+              </div>
             </aside>
           </section>
-        </DndContext>
-      </main>
-    )
-  }
+        )}
 
-  if (phase === 'evidence') {
-    return (
-      <main className="mx-auto w-full max-w-4xl space-y-6 p-6">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-bold">第 2 階段：證據分類</h1>
-          <p className="text-sm text-gray-600">
-            第 {evidenceIndex + 1} / {evidenceQuestions.length} 題
-          </p>
-        </header>
-
-        {renderQuestionBlock(currentEvidenceQuestion)}
-
-        <button
-          onClick={handleEvidenceSubmit}
-          className="rounded bg-black px-4 py-2 text-white"
-        >
-          送出本題
-        </button>
-
-        <p>{status}</p>
-      </main>
-    )
-  }
-
-  if (phase === 'compare') {
-    return (
-      <main className="mx-auto w-full max-w-4xl space-y-6 p-6">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-bold">第 3 階段：對比式回饋</h1>
-          <p className="text-sm text-gray-600">
-            第 {compareIndex + 1} / {compareQuestions.length} 題
-          </p>
-        </header>
-
-        {compareStep === 'first_answer' ? (
-          <section className="space-y-4">
-            <div className="rounded bg-blue-50 p-3 text-sm text-blue-900">
-              先作首答，再閱讀回饋，最後重新改答。
+        {stage === 'awareness' && (
+          <section className="space-y-6">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h2 className="mb-3 text-3xl font-black">第 2 階段：特徵覺察</h2>
+              <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+                這一階段先不急著判門別，先回看你剛剛分類時最常用哪些線索，並分辨哪些線索比較適合拿來分門。
+              </div>
             </div>
-            {renderQuestionBlock(currentCompareQuestion)}
-            <button
-              onClick={handleCompareFirstAnswerNext}
-              className="rounded bg-black px-4 py-2 text-white"
-            >
-              送出首答，查看回饋
-            </button>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h3 className="mb-4 text-2xl font-black">任務 A：回看自己的分類依據</h3>
+              <div className="space-y-5">
+                {bridgeReflectQuestions.map((question) => {
+                  const selected = bridgeReflectAnswers[question.id] ?? []
+                  return (
+                    <div key={question.id} className="rounded-xl border border-gray-200 p-4">
+                      <div className="mb-3 font-bold">{question.prompt}</div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {question.options.map((option) => {
+                          const checked = selected.includes(option)
+                          return (
+                            <label
+                              key={option}
+                              className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...selected, option]
+                                    : selected.filter((item) => item !== option)
+                                  setBridgeReflectAnswers((prev) => ({
+                                    ...prev,
+                                    [question.id]: next,
+                                  }))
+                                }}
+                                className="mt-1"
+                              />
+                              <span>{option}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h3 className="mb-4 text-2xl font-black">任務 B：判斷線索品質</h3>
+              <div className="mb-4 text-sm text-gray-600">
+                請判斷下面哪些線索比較適合幫助分門，哪些只是可能有幫助，但不能單獨決定。
+              </div>
+              <div className="space-y-3">
+                {bridgeFeatureChoices.map((choice) => (
+                  <div
+                    key={choice.id}
+                    className="grid items-center gap-3 rounded-xl border border-gray-200 p-3 md:grid-cols-[1fr_auto]"
+                  >
+                    <div className="font-medium">{choice.text}</div>
+                    <select
+                      value={featureClassification[choice.id] ?? ''}
+                      onChange={(e) =>
+                        setFeatureClassification((prev) => ({
+                          ...prev,
+                          [choice.id]: e.target.value as 'diagnostic' | 'possible_but_unstable' | '',
+                        }))
+                      }
+                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">請選擇</option>
+                      <option value="diagnostic">比較適合幫助分門</option>
+                      <option value="possible_but_unstable">可能有幫助，但不能單獨決定</option>
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-between">
+              <button
+                type="button"
+                onClick={() => setStage('stage1')}
+                className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold"
+              >
+                回到階段 1
+              </button>
+              <button
+                type="button"
+                onClick={() => setStage('build')}
+                className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+              >
+                進入階段 3
+              </button>
+            </div>
           </section>
-        ) : null}
+        )}
 
-        {compareStep === 'feedback' ? (
-          <section className="space-y-4 rounded-xl border bg-white p-5">
-            <h2 className="text-xl font-semibold">回饋</h2>
-            <p className="text-sm text-gray-500">回饋分流代碼：{feedbackVariant}</p>
-            <div className="space-y-2 rounded bg-yellow-50 p-4">
-              <p className="font-medium">首答：{firstAnswer}</p>
-              <p className="text-gray-700">首答理由：{firstReason}</p>
+        {stage === 'build' && (
+          <section className="space-y-6">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h2 className="mb-3 text-3xl font-black">第 3 階段：規則建構</h2>
+              <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+                這一階段先建立自己的簡化檢索表，再用系統檢索表作對照。這裡是鷹架，不是正式測驗。
+              </div>
             </div>
-            <div className="rounded bg-gray-50 p-4">
-              <p className="whitespace-pre-wrap text-gray-800">{feedbackText}</p>
+
+            <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
+              <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                <h3 className="mb-4 text-2xl font-black">A. 拖曳建立你的簡化檢索表</h3>
+                <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  做法：把你覺得重要的特徵拖到下面四個判斷節點。每一個節點代表：
+                  「如果答案是『是』，就先判成那一門；如果不是，再往下看。」
+                </div>
+
+                <div className="mb-5 grid gap-2 md:grid-cols-2">
+                  {bridgeFeatureChoices.map((feature) => {
+                    const used = usedStudentKeyFeatureIds.includes(feature.id)
+                    return (
+                      <div
+                        key={feature.id}
+                        draggable={!used}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', feature.id)
+                        }}
+                        className={`rounded-xl border p-3 text-sm ${
+                          used
+                            ? 'border-gray-200 bg-gray-100 text-gray-400'
+                            : 'cursor-move border-gray-300 bg-white text-gray-800'
+                        }`}
+                      >
+                        <div className="font-semibold">{feature.text}</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          {feature.category === 'diagnostic'
+                            ? '偏診斷性特徵'
+                            : '可能有幫助，但不一定能單獨決定'}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="space-y-3">
+                  {KEY_SLOT_TARGETS.map((slot, index) => {
+                    const featureId = studentKeySlots[index]
+                    const feature = featureId ? getFeatureById(featureId) : null
+                    return (
+                      <div
+                        key={slot.id}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          const featureDropId = e.dataTransfer.getData('text/plain')
+                          if (!featureDropId) return
+                          handleDropFeatureToSlot(index, featureDropId)
+                        }}
+                        className="rounded-2xl border border-gray-300 p-4"
+                      >
+                        <div className="mb-1 text-sm font-semibold text-gray-500">{slot.label}</div>
+                        <div className="mb-3 text-lg font-black">如果答案是「是」→ {slot.result}</div>
+                        <div className="min-h-[72px] rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-3">
+                          {feature ? (
+                            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-300 bg-white p-3">
+                              <div>
+                                <div className="font-semibold">{feature.text}</div>
+                                <div className="mt-1 text-xs text-gray-500">
+                                  {feature.category === 'diagnostic'
+                                    ? '偏診斷性特徵'
+                                    : '可能有幫助，但不一定能單獨決定'}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setStudentKeySlots((prev) => {
+                                    const next = [...prev]
+                                    next[index] = null
+                                    return next
+                                  })
+                                }
+                                className="rounded-lg border border-gray-300 px-2 py-1 text-xs"
+                              >
+                                移除
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-sm text-gray-500">
+                              把一個特徵拖到這裡
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="mt-5 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setStudentKeySlots([null, null, null, null])}
+                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold"
+                  >
+                    清空檢索表
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                  <h3 className="mb-4 text-2xl font-black">B. 系統簡化檢索表（參考）</h3>
+                  <div className="space-y-3">
+                    {dichotomousKeyV1
+                      .filter((node) => node.question)
+                      .map((node, index) => (
+                        <div key={node.id} className="rounded-xl border border-gray-200 p-3">
+                          <div className="text-sm font-semibold text-gray-500">步驟 {index + 1}</div>
+                          <div className="font-semibold">{node.question}</div>
+                          {node.hint ? (
+                            <div className="mt-2 text-sm text-gray-600">提示：{node.hint}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                  <h3 className="mb-4 text-2xl font-black">C. 測試你的檢索表</h3>
+
+                  <label className="mb-2 block text-sm font-semibold text-gray-700">
+                    選一張卡來測試
+                  </label>
+                  <select
+                    value={selectedTestCardId}
+                    onChange={(e) => setSelectedTestCardId(e.target.value)}
+                    className="mb-4 w-full rounded-lg border border-gray-300 px-3 py-2"
+                  >
+                    {stage1Cards.map((card) => (
+                      <option key={card.id} value={card.id}>
+                        {card.id} {card.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="mb-4 rounded-xl border border-gray-200 p-3">
+                    <div className="mb-2 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 p-2">
+                      <img
+                        src={getCardById(selectedTestCardId)?.imageUrl}
+                        alt={getCardById(selectedTestCardId)?.name}
+                        className="h-36 w-full object-contain"
+                      />
+                    </div>
+                    <div className="text-sm font-semibold text-gray-500">
+                      {getCardById(selectedTestCardId)?.id}
+                    </div>
+                    <div className="font-bold">{getCardById(selectedTestCardId)?.name}</div>
+                    <div className="mt-3 text-sm font-semibold text-gray-700">
+                      這張卡的關鍵特徵
+                    </div>
+                    <ul className="mt-2 list-disc pl-5 text-sm text-gray-700">
+                      {getCardById(selectedTestCardId)?.diagnosticFeatures.map((feature) => (
+                        <li key={feature}>{feature}</li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 rounded-lg bg-yellow-50 p-2 text-sm text-yellow-800">
+                      提醒：{getCardById(selectedTestCardId)?.warning}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+                    <div className="text-sm font-semibold text-green-700">你的檢索表判定結果</div>
+                    <div className="mt-1 text-2xl font-black text-green-900">
+                      {studentKeyTestResult}
+                    </div>
+                    <div className="mt-2 text-sm text-green-800">
+                      正確門別：{getCardById(selectedTestCardId)?.phylum}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                  <h3 className="mb-4 text-2xl font-black">D. 觀察卡參考</h3>
+                  <div className="space-y-3">
+                    {stage1Cards.map((card) => {
+                      const expanded = expandedCardId === card.id
+                      return (
+                        <button
+                          key={card.id}
+                          type="button"
+                          onClick={() => setExpandedCardId(expanded ? '' : card.id)}
+                          className="w-full rounded-xl border border-gray-200 p-3 text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={card.imageUrl}
+                              alt={card.name}
+                              className="h-16 w-16 rounded-lg border border-gray-200 object-contain"
+                            />
+                            <div>
+                              <div className="text-sm font-semibold text-gray-500">{card.id}</div>
+                              <div className="font-bold">{card.name}</div>
+                            </div>
+                          </div>
+                          {expanded ? (
+                            <div className="mt-3 space-y-2 text-sm text-gray-700">
+                              <div className="font-semibold">關鍵特徵</div>
+                              <ul className="list-disc pl-5">
+                                {card.diagnosticFeatures.map((feature) => (
+                                  <li key={feature}>{feature}</li>
+                                ))}
+                              </ul>
+                              <div className="rounded-lg bg-yellow-50 p-2 text-yellow-800">
+                                提醒：{card.warning}
+                              </div>
+                            </div>
+                          ) : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
             </div>
-            <button
-              onClick={handleCompareFeedbackNext}
-              className="rounded bg-black px-4 py-2 text-white"
-            >
-              進入改答
-            </button>
+
+            <div className="flex justify-between">
+              <button
+                type="button"
+                onClick={() => setStage('awareness')}
+                className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold"
+              >
+                回到階段 2
+              </button>
+              <button
+                type="button"
+                onClick={() => setStage('evidence')}
+                className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+              >
+                進入階段 4
+              </button>
+            </div>
           </section>
-        ) : null}
+        )}
 
-        {compareStep === 'final_answer' ? (
-          <section className="space-y-4">
-            <div className="rounded bg-green-50 p-3 text-sm text-green-900">
-              請根據回饋重新作答。
+        {stage === 'evidence' && currentEvidence && (
+          <section className="space-y-6">
+            <QuestionCard
+              title={`第 4 階段：門別判定（${evidenceIndex + 1} / ${evidenceQuestions.length}）`}
+              prompt={currentEvidence.prompt}
+              stimulusText={currentEvidence.stimulusText}
+              imageUrl={currentEvidence.imageUrl}
+            />
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="mb-3 text-lg font-black">請選擇門別</div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {currentEvidence.options.map((option) => (
+                  <label
+                    key={option}
+                    className="flex items-center gap-2 rounded-lg border border-gray-200 p-3"
+                  >
+                    <input
+                      type="radio"
+                      name={`evidence-${currentEvidence.id}`}
+                      checked={evidenceAnswer === option}
+                      onChange={() => setEvidenceAnswer(option)}
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="mt-5 mb-3 text-lg font-black">你最主要依據哪些特徵？（可複選）</div>
+              <FeatureCheckboxes
+                selected={evidenceSelectedFeatures}
+                onChange={setEvidenceSelectedFeatures}
+              />
+
+              <div className="mt-5 mb-2 text-lg font-black">簡短說明理由</div>
+              <textarea
+                value={evidenceReasonText}
+                onChange={(e) => setEvidenceReasonText(e.target.value)}
+                className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
+                placeholder="請簡短寫出你為什麼這樣判斷"
+              />
+
+              <div className="mt-5 mb-2 text-lg font-black">信心程度</div>
+              <input
+                type="range"
+                min={1}
+                max={4}
+                value={evidenceConfidence}
+                onChange={(e) => setEvidenceConfidence(Number(e.target.value))}
+                className="w-full"
+              />
+              <div className="mt-1 text-sm text-gray-600">目前信心：{evidenceConfidence} / 4</div>
+
+              <div className="mt-6 flex justify-between">
+                <button
+                  type="button"
+                  onClick={() => setStage('build')}
+                  className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold"
+                >
+                  回到階段 3
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!evidenceAnswer) {
+                      alert('請先選擇一個門別。')
+                      return
+                    }
+
+                    setEvidenceResponses((prev) => [
+                      ...prev,
+                      {
+                        questionId: currentEvidence.id,
+                        answer: evidenceAnswer,
+                        selectedFeatures: evidenceSelectedFeatures,
+                        reasonText: evidenceReasonText,
+                        confidence: evidenceConfidence,
+                      },
+                    ])
+
+                    if (evidenceIndex < evidenceQuestions.length - 1) {
+                      setEvidenceIndex((prev) => prev + 1)
+                      resetEvidenceForm()
+                    } else {
+                      resetEvidenceForm()
+                      setStage('compare')
+                    }
+                  }}
+                  className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+                >
+                  {evidenceIndex < evidenceQuestions.length - 1 ? '下一題' : '進入階段 5'}
+                </button>
+              </div>
             </div>
-            {renderQuestionBlock(currentCompareQuestion)}
-            <button
-              onClick={handleCompareFinalSubmit}
-              className="rounded bg-black px-4 py-2 text-white"
-            >
-              送出改答
-            </button>
           </section>
-        ) : null}
+        )}
 
-        <p>{status}</p>
-      </main>
-    )
-  }
+        {stage === 'compare' && currentCompare && (
+          <section className="space-y-6">
+            <QuestionCard
+              title={`第 5 階段：對比修正（${compareIndex + 1} / ${compareQuestions.length}）`}
+              prompt={currentCompare.prompt}
+              stimulusText={currentCompare.stimulusText}
+              imageUrl={currentCompare.imageUrl}
+            />
 
-  if (phase === 'transfer') {
-    return (
-      <main className="mx-auto w-full max-w-4xl space-y-6 p-6">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-bold">第 4 階段：遷移測驗</h1>
-          <p className="text-sm text-gray-600">
-            第 {transferIndex + 1} / {transferQuestions.length} 題
-          </p>
-        </header>
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="mb-2 rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
+                比較焦點：{currentCompare.compareFocus}
+              </div>
 
-        {renderQuestionBlock(currentTransferQuestion)}
+              {compareMode === 'first' && (
+                <>
+                  <div className="mb-3 text-lg font-black">第一次作答</div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {currentCompare.options.map((option) => (
+                      <label
+                        key={option}
+                        className="flex items-center gap-2 rounded-lg border border-gray-200 p-3"
+                      >
+                        <input
+                          type="radio"
+                          name={`compare-first-${currentCompare.id}`}
+                          checked={compareFirstAnswer === option}
+                          onChange={() => setCompareFirstAnswer(option)}
+                        />
+                        <span>{option}</span>
+                      </label>
+                    ))}
+                  </div>
 
-        <button
-          onClick={handleTransferSubmit}
-          className="rounded bg-black px-4 py-2 text-white"
-        >
-          送出本題
-        </button>
+                  <div className="mt-5 mb-3 text-lg font-black">第一次作答時依據哪些特徵？</div>
+                  <FeatureCheckboxes
+                    selected={compareFirstSelectedFeatures}
+                    onChange={setCompareFirstSelectedFeatures}
+                  />
 
-        <p>{status}</p>
-      </main>
-    )
-  }
+                  <div className="mt-5 mb-2 text-lg font-black">第一次理由</div>
+                  <textarea
+                    value={compareFirstReasonText}
+                    onChange={(e) => setCompareFirstReasonText(e.target.value)}
+                    className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
+                    placeholder="請簡短寫出你第一次的理由"
+                  />
 
-  return (
-    <main className="mx-auto w-full max-w-3xl space-y-6 p-6">
-      <h1 className="text-3xl font-bold">作答完成</h1>
-      <p>已完成所有階段，資料已送出。</p>
-      <p>{status}</p>
+                  <div className="mt-5 mb-2 text-lg font-black">第一次信心程度</div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    value={compareFirstConfidence}
+                    onChange={(e) => setCompareFirstConfidence(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="mt-1 text-sm text-gray-600">
+                    目前信心：{compareFirstConfidence} / 4
+                  </div>
+
+                  <div className="mt-6 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!compareFirstAnswer) {
+                          alert('請先完成第一次作答。')
+                          return
+                        }
+                        setCompareFeedback(getCompareFeedback(currentCompare, compareFirstAnswer))
+                        setCompareMode('feedback')
+                        setCompareFinalAnswer(compareFirstAnswer)
+                        setCompareFinalSelectedFeatures(compareFirstSelectedFeatures)
+                        setCompareFinalReasonText(compareFirstReasonText)
+                        setCompareFinalConfidence(compareFirstConfidence)
+                      }}
+                      className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+                    >
+                      看回饋
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {compareMode === 'feedback' && (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                  <div className="mb-2 text-lg font-black text-blue-900">回饋</div>
+                  <div className="text-sm leading-6 text-blue-900">{compareFeedback}</div>
+
+                  <div className="mt-6 mb-3 text-lg font-black text-gray-900">改答</div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {currentCompare.options.map((option) => (
+                      <label
+                        key={option}
+                        className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-3"
+                      >
+                        <input
+                          type="radio"
+                          name={`compare-final-${currentCompare.id}`}
+                          checked={compareFinalAnswer === option}
+                          onChange={() => setCompareFinalAnswer(option)}
+                        />
+                        <span>{option}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="mt-5 mb-3 text-lg font-black text-gray-900">改答後依據哪些特徵？</div>
+                  <FeatureCheckboxes
+                    selected={compareFinalSelectedFeatures}
+                    onChange={setCompareFinalSelectedFeatures}
+                  />
+
+                  <div className="mt-5 mb-2 text-lg font-black text-gray-900">改答後理由</div>
+                  <textarea
+                    value={compareFinalReasonText}
+                    onChange={(e) => setCompareFinalReasonText(e.target.value)}
+                    className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2 text-gray-900"
+                    placeholder="請寫出你改答後的理由"
+                  />
+
+                  <div className="mt-5 mb-2 text-lg font-black text-gray-900">改答後信心程度</div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    value={compareFinalConfidence}
+                    onChange={(e) => setCompareFinalConfidence(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="mt-1 text-sm text-gray-600">
+                    目前信心：{compareFinalConfidence} / 4
+                  </div>
+
+                  <div className="mt-6 flex justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setCompareMode('first')}
+                      className="rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm font-semibold"
+                    >
+                      回看第一次作答
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!compareFirstAnswer || !compareFinalAnswer) {
+                          alert('請完成改答。')
+                          return
+                        }
+
+                        setCompareResponses((prev) => [
+                          ...prev,
+                          {
+                            questionId: currentCompare.id,
+                            firstAnswer: compareFirstAnswer,
+                            firstSelectedFeatures: compareFirstSelectedFeatures,
+                            firstReasonText: compareFirstReasonText,
+                            firstConfidence: compareFirstConfidence,
+                            finalAnswer: compareFinalAnswer,
+                            finalSelectedFeatures: compareFinalSelectedFeatures,
+                            finalReasonText: compareFinalReasonText,
+                            finalConfidence: compareFinalConfidence,
+                          },
+                        ])
+
+                        if (compareIndex < compareQuestions.length - 1) {
+                          setCompareIndex((prev) => prev + 1)
+                          resetCompareForm()
+                        } else {
+                          resetCompareForm()
+                          setStage('transfer')
+                        }
+                      }}
+                      className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+                    >
+                      {compareIndex < compareQuestions.length - 1 ? '下一題' : '進入階段 6'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {stage === 'transfer' && currentTransfer && (
+          <section className="space-y-6">
+            <QuestionCard
+              title={`第 6 階段：遷移檢驗（${transferIndex + 1} / ${transferQuestions.length}）`}
+              prompt={currentTransfer.prompt}
+              stimulusText={currentTransfer.stimulusText}
+              imageUrl={currentTransfer.imageUrl}
+            />
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="mb-3 text-lg font-black">請選擇門別</div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {currentTransfer.options.map((option) => (
+                  <label
+                    key={option}
+                    className="flex items-center gap-2 rounded-lg border border-gray-200 p-3"
+                  >
+                    <input
+                      type="radio"
+                      name={`transfer-${currentTransfer.id}`}
+                      checked={transferAnswer === option}
+                      onChange={() => setTransferAnswer(option)}
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="mt-5 mb-3 text-lg font-black">你最主要依據哪些特徵？（可複選）</div>
+              <FeatureCheckboxes
+                selected={transferSelectedFeatures}
+                onChange={setTransferSelectedFeatures}
+              />
+
+              <div className="mt-5 mb-2 text-lg font-black">簡短說明理由</div>
+              <textarea
+                value={transferReasonText}
+                onChange={(e) => setTransferReasonText(e.target.value)}
+                className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
+                placeholder="請簡短寫出你為什麼這樣判斷"
+              />
+
+              <div className="mt-5 mb-2 text-lg font-black">信心程度</div>
+              <input
+                type="range"
+                min={1}
+                max={4}
+                value={transferConfidence}
+                onChange={(e) => setTransferConfidence(Number(e.target.value))}
+                className="w-full"
+              />
+              <div className="mt-1 text-sm text-gray-600">目前信心：{transferConfidence} / 4</div>
+
+              <div className="mt-6 flex justify-between">
+                <button
+                  type="button"
+                  onClick={() => setStage('compare')}
+                  className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold"
+                >
+                  回到階段 5
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!transferAnswer) {
+                      alert('請先選擇一個門別。')
+                      return
+                    }
+
+                    setTransferResponses((prev) => [
+                      ...prev,
+                      {
+                        questionId: currentTransfer.id,
+                        answer: transferAnswer,
+                        selectedFeatures: transferSelectedFeatures,
+                        reasonText: transferReasonText,
+                        confidence: transferConfidence,
+                      },
+                    ])
+
+                    if (transferIndex < transferQuestions.length - 1) {
+                      setTransferIndex((prev) => prev + 1)
+                      resetTransferForm()
+                    } else {
+                      resetTransferForm()
+                      setStage('done')
+                    }
+                  }}
+                  className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+                >
+                  {transferIndex < transferQuestions.length - 1 ? '下一題' : '完成'}
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {stage === 'done' && (
+          <section className="space-y-6">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h2 className="mb-3 text-3xl font-black">完成</h2>
+              <div className="rounded-xl bg-green-50 p-4 text-sm leading-6 text-green-900">
+                六階段流程已完成。下面直接輸出目前前端蒐集到的資料，方便你檢查結構。
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-2xl font-black">資料預覽</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(exportPayload, null, 2))
+                  }}
+                  className="rounded-xl border border-gray-300 px-3 py-2 text-sm font-semibold"
+                >
+                  複製 JSON
+                </button>
+              </div>
+              <pre className="overflow-x-auto rounded-xl bg-gray-50 p-4 text-xs leading-6 text-gray-800">
+                {JSON.stringify(exportPayload, null, 2)}
+              </pre>
+            </div>
+
+            <div className="flex justify-between">
+              <button
+                type="button"
+                onClick={() => setStage('transfer')}
+                className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold"
+              >
+                回到階段 6
+              </button>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+              >
+                重新開始
+              </button>
+            </div>
+          </section>
+        )}
+      </div>
     </main>
   )
 }
