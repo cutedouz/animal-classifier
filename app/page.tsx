@@ -527,7 +527,7 @@ export default function Page() {
                             className="h-44 w-full object-contain"
                           />
                         </div>
-                        <div className="text-sm font-semibold text-gray-500">{card.id}</div>
+                        <div className="text-sm font-semibold text-gray-700">{card.id}</div>
                         <div className="text-xl font-bold">{card.name}</div>
                       </div>
                     )
@@ -588,7 +588,7 @@ export default function Page() {
                       </button>
                     </div>
 
-                    <div className="mb-2 text-sm text-gray-500">第 {groupIndex + 1} 組</div>
+                    <div className="mb-2 text-sm text-gray-700">第 {groupIndex + 1} 組</div>
 
                     <div
                       onDragOver={(e) => e.preventDefault()}
@@ -601,7 +601,7 @@ export default function Page() {
                       className="mb-3 min-h-[120px] rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-3"
                     >
                       {group.cardIds.length === 0 ? (
-                        <div className="text-lg font-bold text-gray-500">拖曳卡片到這一組</div>
+                        <div className="text-lg font-bold text-gray-700">拖曳卡片到這一組</div>
                       ) : (
                         <div className="grid gap-3 sm:grid-cols-2">
                           {group.cardIds.map((cardId) => {
@@ -631,7 +631,7 @@ export default function Page() {
                                     className="h-24 w-full object-contain"
                                   />
                                 </div>
-                                <div className="text-sm font-semibold text-gray-500">{card.id}</div>
+                                <div className="text-sm font-semibold text-gray-700">{card.id}</div>
                                 <div className="font-bold">{card.name}</div>
                               </div>
                             )
