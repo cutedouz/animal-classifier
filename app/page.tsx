@@ -481,10 +481,10 @@ export default function Page() {
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-3xl font-black">第 1 階段：自由預分類</h2>
+                  <h2 className="text-3xl font-black text-gray-900">第 1 階段：自由預分類</h2>
                   <div className="mt-2 text-sm text-gray-600">participant code：{participantCode}</div>
                 </div>
-                <div className="grid gap-1 text-sm text-gray-600">
+                <div className="grid gap-1 text-sm text-gray-700">
                   <div>目前群組數：{groups.length}</div>
                   <div>群組建立次數（含初始兩組）：{groupCreateCount}</div>
                   <div>卡片移動次數：{cardMoveCount}</div>
@@ -505,8 +505,8 @@ export default function Page() {
                 }}
                 className="rounded-2xl border border-gray-200 p-4"
               >
-                <div className="mb-3 text-xl font-bold">待分類生物卡</div>
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                <div className="mb-3 text-xl font-bold text-gray-900">待分類生物卡</div>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
                   {bankCardIds.map((cardId) => {
                     const card = getCardById(cardId)
                     if (!card) return null
@@ -518,17 +518,18 @@ export default function Page() {
                           const payload: DragPayload = { cardId: card.id, source: 'bank' }
                           e.dataTransfer.setData('application/json', JSON.stringify(payload))
                         }}
-                        className="cursor-move rounded-2xl border border-gray-300 bg-white p-3"
+                        className="cursor-move rounded-xl border border-gray-300 bg-white p-2 transition hover:shadow-sm"
                       >
-                        <div className="mb-3 overflow-hidden rounded-xl border border-gray-200 bg-gray-50 p-2">
+                        <div className="mb-2 flex h-28 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white p-1">
                           <img
                             src={card.imageUrl}
                             alt={card.name}
-                            className="h-44 w-full object-contain"
+                            className="max-h-full max-w-full object-contain"
+                            draggable={false}
                           />
                         </div>
-                        <div className="text-sm font-semibold text-gray-700">{card.id}</div>
-                        <div className="text-xl font-bold">{card.name}</div>
+                        <div className="text-xs font-semibold text-gray-700">{card.id}</div>
+                        <div className="text-lg font-bold leading-tight text-gray-900">{card.name}</div>
                       </div>
                     )
                   })}
@@ -538,7 +539,7 @@ export default function Page() {
 
             <aside className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-2xl font-black">你的群組</h2>
+                <h2 className="text-2xl font-black text-gray-900">你的群組</h2>
                 <button
                   type="button"
                   onClick={() => {
@@ -554,7 +555,7 @@ export default function Page() {
                     ])
                     setGroupCreateCount((count) => count + 1)
                   }}
-                  className="rounded-xl border border-gray-300 px-3 py-2 text-sm font-semibold"
+                  className="rounded-xl border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-800"
                 >
                   新增群組
                 </button>
@@ -562,8 +563,8 @@ export default function Page() {
 
               <div className="space-y-4">
                 {groups.map((group, groupIndex) => (
-                  <div key={group.id} className="rounded-2xl border border-gray-300 p-4">
-                    <div className="mb-3 flex items-center gap-2">
+                  <div key={group.id} className="rounded-2xl border border-gray-300 p-3">
+                    <div className="mb-2 flex items-center gap-2">
                       <input
                         value={group.name}
                         onChange={(e) => {
@@ -574,7 +575,7 @@ export default function Page() {
                             )
                           )
                         }}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900"
                       />
                       <button
                         type="button"
@@ -582,7 +583,7 @@ export default function Page() {
                         onClick={() => {
                           setGroups((prev) => prev.filter((item) => item.id !== group.id))
                         }}
-                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-40"
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-40"
                       >
                         刪除空組
                       </button>
@@ -598,12 +599,12 @@ export default function Page() {
                         if (!payloadRaw) return
                         handleDropOnGroup(group.id, JSON.parse(payloadRaw) as DragPayload)
                       }}
-                      className="mb-3 min-h-[120px] rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-3"
+                      className="mb-3 min-h-[96px] rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-3"
                     >
                       {group.cardIds.length === 0 ? (
                         <div className="text-lg font-bold text-gray-700">拖曳卡片到這一組</div>
                       ) : (
-                        <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-2 sm:grid-cols-2">
                           {group.cardIds.map((cardId) => {
                             const card = getCardById(cardId)
                             if (!card) return null
@@ -622,17 +623,18 @@ export default function Page() {
                                     JSON.stringify(payload)
                                   )
                                 }}
-                                className="cursor-move rounded-xl border border-gray-300 bg-white p-2"
+                                className="cursor-move rounded-lg border border-gray-300 bg-white p-2"
                               >
-                                <div className="mb-2 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 p-2">
+                                <div className="mb-2 flex h-16 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white p-1">
                                   <img
                                     src={card.imageUrl}
                                     alt={card.name}
-                                    className="h-24 w-full object-contain"
+                                    className="max-h-full max-w-full object-contain"
+                                    draggable={false}
                                   />
                                 </div>
-                                <div className="text-sm font-semibold text-gray-700">{card.id}</div>
-                                <div className="font-bold">{card.name}</div>
+                                <div className="text-xs font-semibold text-gray-700">{card.id}</div>
+                                <div className="text-base font-bold leading-tight text-gray-900">{card.name}</div>
                               </div>
                             )
                           })}
@@ -652,20 +654,10 @@ export default function Page() {
                         )
                       }}
                       placeholder="請說明你為什麼把這些生物分在一起"
-                      className="min-h-[96px] w-full rounded-xl border border-gray-300 px-3 py-2"
+                      className="min-h-[96px] w-full rounded-xl border border-gray-300 px-3 py-2 text-sm leading-6 text-gray-900 placeholder:text-gray-400"
                     />
                   </div>
                 ))}
-              </div>
-
-              <div className="mt-5 rounded-2xl border border-gray-300 p-4">
-                <div className="mb-2 text-lg font-black">整體分類理由</div>
-                <textarea
-                  value={overallReason}
-                  onChange={(e) => setOverallReason(e.target.value)}
-                  placeholder="請說明你整體分類時最常用的依據"
-                  className="min-h-[120px] w-full rounded-xl border border-gray-300 px-3 py-2"
-                />
               </div>
 
               <div className="mt-5 flex justify-end">
@@ -681,7 +673,7 @@ export default function Page() {
           </section>
         )}
 
-        {stage === 'awareness' && (
+{stage === 'awareness' && (
           <section className="space-y-6">
             <div className="rounded-2xl border border-gray-200 bg-white p-5">
               <h2 className="mb-3 text-3xl font-black">第 2 階段：特徵覺察</h2>
