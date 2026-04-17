@@ -470,9 +470,6 @@ export default function Page() {
         <h1 className="mb-2 text-4xl font-black tracking-tight text-gray-900">
           動物分類學習網站
         </h1>
-        <p className="mb-6 text-sm text-gray-600">
-          研究型 MVP｜主構念：依特徵進行動物門級分類
-        </p>
 
         <StepHeader stage={stage} setStage={setStage} />
 
@@ -528,7 +525,6 @@ export default function Page() {
                             draggable={false}
                           />
                         </div>
-                        <div className="text-xs font-semibold text-gray-700">{card.id}</div>
                         <div className="text-lg font-bold leading-tight text-gray-900">{card.name}</div>
                       </div>
                     )
@@ -604,7 +600,7 @@ export default function Page() {
                       {group.cardIds.length === 0 ? (
                         <div className="text-lg font-bold text-gray-700">拖曳卡片到這一組</div>
                       ) : (
-                        <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="flex flex-wrap gap-2">
                           {group.cardIds.map((cardId) => {
                             const card = getCardById(cardId)
                             if (!card) return null
@@ -623,7 +619,7 @@ export default function Page() {
                                     JSON.stringify(payload)
                                   )
                                 }}
-                                className="cursor-move rounded-lg border border-gray-300 bg-white p-2"
+                                className="w-[132px] flex-none cursor-move rounded-lg border border-gray-300 bg-white p-2"
                               >
                                 <div className="mb-2 flex h-16 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white p-1">
                                   <img
@@ -633,7 +629,6 @@ export default function Page() {
                                     draggable={false}
                                   />
                                 </div>
-                                <div className="text-xs font-semibold text-gray-700">{card.id}</div>
                                 <div className="text-base font-bold leading-tight text-gray-900">{card.name}</div>
                               </div>
                             )
