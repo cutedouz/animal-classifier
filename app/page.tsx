@@ -189,7 +189,7 @@ function StepHeader({
 
   return (
     <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-4">
-      <div className="mb-2 text-sm font-semibold text-gray-700">流程</div>
+      <div className="sr-only">流程</div>
       <div className="flex flex-wrap gap-2">
         {items.map((item, index) => {
           const active = stage === item.key
@@ -533,33 +533,43 @@ export default function Page() {
               </div>
             </div>
 
-            <aside className="rounded-2xl border border-gray-200 bg-white p-5">
+            <aside className="rounded-2xl border border-gray-200 bg-white p-5 lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-120px)] lg:overflow-y-auto">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-2xl font-black text-gray-900">你的群組</h2>
                 <button
                   type="button"
+                  disabled={groups.length >= 8}
                   onClick={() => {
+                    if (groups.length >= 8) return
                     const nextIndex = groups.length + 1
+                    const newGroupId = `G${Date.now()}`
                     setGroups((prev) => [
                       ...prev,
                       {
-                        id: `G${Date.now()}`,
+                        id: newGroupId,
                         name: `群組 ${nextIndex}`,
                         reason: '',
                         cardIds: [],
                       },
                     ])
                     setGroupCreateCount((count) => count + 1)
+
+                    window.setTimeout(() => {
+                      document.getElementById(newGroupId)?.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'nearest',
+                      })
+                    }, 80)
                   }}
-                  className="rounded-xl border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-800"
+                  className="rounded-xl border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  新增群組
+                  {groups.length >= 8 ? '已達上限' : '新增群組'}
                 </button>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {groups.map((group, groupIndex) => (
-                  <div key={group.id} className="rounded-2xl border border-gray-300 p-3">
+                  <div id={group.id} key={group.id} className="rounded-2xl border border-gray-300 p-2">
                     <div className="mb-2 flex items-center gap-2">
                       <input
                         value={group.name}
@@ -595,12 +605,12 @@ export default function Page() {
                         if (!payloadRaw) return
                         handleDropOnGroup(group.id, JSON.parse(payloadRaw) as DragPayload)
                       }}
-                      className="mb-3 min-h-[96px] rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-3"
+                      className="mb-2 min-h-[72px] max-h-[220px] overflow-y-auto rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-2"
                     >
                       {group.cardIds.length === 0 ? (
                         <div className="text-lg font-bold text-gray-700">拖曳卡片到這一組</div>
                       ) : (
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap items-start gap-1.5">
                           {group.cardIds.map((cardId) => {
                             const card = getCardById(cardId)
                             if (!card) return null
@@ -619,9 +629,9 @@ export default function Page() {
                                     JSON.stringify(payload)
                                   )
                                 }}
-                                className="w-[132px] flex-none cursor-move rounded-lg border border-gray-300 bg-white p-2"
+                                className="w-[88px] flex-none cursor-move rounded-lg border border-gray-300 bg-white p-1.5"
                               >
-                                <div className="mb-2 flex h-16 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white p-1">
+                                <div className="mb-1 flex h-10 items-center justify-center overflow-hidden rounded-md border border-gray-200 bg-white p-1">
                                   <img
                                     src={card.imageUrl}
                                     alt={card.name}
@@ -629,7 +639,7 @@ export default function Page() {
                                     draggable={false}
                                   />
                                 </div>
-                                <div className="text-base font-bold leading-tight text-gray-900">{card.name}</div>
+                                <div className="text-xs font-bold leading-tight text-gray-900 break-words">{card.name}</div>
                               </div>
                             )
                           })}
@@ -649,7 +659,7 @@ export default function Page() {
                         )
                       }}
                       placeholder="請說明你為什麼把這些生物分在一起"
-                      className="min-h-[96px] w-full rounded-xl border border-gray-300 px-3 py-2 text-sm leading-6 text-gray-900 placeholder:text-gray-400"
+                      className="min-h-[56px] w-full rounded-xl border border-gray-300 px-3 py-2 text-sm leading-5 text-gray-900 placeholder:text-gray-400"
                     />
                   </div>
                 ))}
