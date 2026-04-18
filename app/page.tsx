@@ -1,6 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import Image from 'next/image'
+import { useMemo, useState } from 'react'
+import {
+  DndContext,
+  type DragEndEvent,
+  useDraggable,
+  useDroppable,
+} from '@dnd-kit/core'
 import { supabase } from '@/lib/supabase'
 import { evidenceQuestions, compareQuestions, transferQuestions } from '@/lib/questions'
 import { inferMisconception } from '@/lib/misconception'
@@ -16,35 +23,110 @@ type AppPhase =
 
 type CompareStep = 'first_answer' | 'feedback' | 'final_answer'
 
-type PreclassifyGroupForm = {
+type PreclassifyGroup = {
+  id: string
   groupName: string
-  itemsText: string
   reason: string
+  cardIds: string[]
 }
 
-function makeEmptyGroup(): PreclassifyGroupForm {
+type DragContainerId = 'ungrouped' | string
+
+const UNGROUPED_ID = 'ungrouped'
+
+function makeGroupId() {
+  return `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function makeEmptyGroup(index: number): PreclassifyGroup {
   return {
-    groupName: '',
-    itemsText: '',
+    id: makeGroupId(),
+    groupName: `群組 ${index + 1}`,
     reason: '',
+    cardIds: [],
   }
+}
+
+function DraggableAnimalCard({
+  id,
+  name,
+  imageUrl,
+}: {
+  id: string
+  name: string
+  imageUrl: string
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id,
+  })
+
+  const style = transform
+    ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        touchAction: 'none' as const,
+      }
+    : { touchAction: 'none' as const }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={`cursor-grab rounded-lg border bg-white p-2 shadow-sm ${
+        isDragging ? 'opacity-60' : ''
+      }`}
+    >
+      <div className="relative mb-2 aspect-[4/3] w-full overflow-hidden rounded bg-gray-100">
+        <Image src={imageUrl} alt={name} fill className="object-cover" />
+      </div>
+      <p className="text-sm font-semibold">{id}</p>
+      <p className="text-sm">{name}</p>
+    </div>
+  )
+}
+
+function DropContainer({
+  id,
+  title,
+  children,
+}: {
+  id: string
+  title: string
+  children: React.ReactNode
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id })
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`rounded-xl border p-4 ${
+        isOver ? 'border-black bg-gray-50' : 'border-gray-300 bg-white'
+      }`}
+    >
+      <h3 className="mb-3 font-medium">{title}</h3>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">{children}</div>
+    </div>
+  )
 }
 
 export default function Home() {
   const [participantCode, setParticipantCode] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
-
   const [phase, setPhase] = useState<AppPhase>('start')
   const [status, setStatus] = useState('')
 
-  const [preclassifyGroupCount, setPreclassifyGroupCount] = useState(3)
-  const [preclassifyGroups, setPreclassifyGroups] = useState<PreclassifyGroupForm[]>([
-    makeEmptyGroup(),
-    makeEmptyGroup(),
-    makeEmptyGroup(),
+  const [preclassifyGroups, setPreclassifyGroups] = useState<PreclassifyGroup[]>([
+    makeEmptyGroup(0),
+    makeEmptyGroup(1),
   ])
+  const [ungroupedCardIds, setUngroupedCardIds] = useState<string[]>(
+    preclassifyCards.map((card) => card.id)
+  )
   const [preclassifyOverallReason, setPreclassifyOverallReason] = useState('')
   const [preclassifyEditCount, setPreclassifyEditCount] = useState(0)
+  const [groupCreateCount, setGroupCreateCount] = useState(2)
+  const [cardMoveCount, setCardMoveCount] = useState(0)
 
   const [evidenceIndex, setEvidenceIndex] = useState(0)
   const [compareIndex, setCompareIndex] = useState(0)
@@ -66,38 +148,97 @@ export default function Home() {
   const currentCompareQuestion = compareQuestions[compareIndex]
   const currentTransferQuestion = transferQuestions[transferIndex]
 
-  function resizePreclassifyGroups(nextCount: number) {
-    setPreclassifyGroupCount(nextCount)
+  const cardMap = useMemo(
+    () => Object.fromEntries(preclassifyCards.map((card) => [card.id, card])),
+    []
+  )
+
+  function addPreclassifyGroup() {
+    setPreclassifyGroups((prev) => [...prev, makeEmptyGroup(prev.length)])
+    setGroupCreateCount((prev) => prev + 1)
+    setPreclassifyEditCount((prev) => prev + 1)
+  }
+
+  function updatePreclassifyGroupName(groupId: string, value: string) {
+    setPreclassifyGroups((prev) =>
+      prev.map((group) =>
+        group.id === groupId ? { ...group, groupName: value } : group
+      )
+    )
+    setPreclassifyEditCount((prev) => prev + 1)
+  }
+
+  function updatePreclassifyGroupReason(groupId: string, value: string) {
+    setPreclassifyGroups((prev) =>
+      prev.map((group) =>
+        group.id === groupId ? { ...group, reason: value } : group
+      )
+    )
+    setPreclassifyEditCount((prev) => prev + 1)
+  }
+
+  function deleteEmptyGroup(groupId: string) {
     setPreclassifyGroups((prev) => {
-      const next = [...prev]
-      if (nextCount > next.length) {
-        while (next.length < nextCount) {
-          next.push(makeEmptyGroup())
-        }
-      } else {
-        next.length = nextCount
-      }
-      return next
+      const target = prev.find((g) => g.id === groupId)
+      if (!target) return prev
+      if (target.cardIds.length > 0) return prev
+      return prev.filter((g) => g.id !== groupId)
     })
     setPreclassifyEditCount((prev) => prev + 1)
   }
 
-  function updatePreclassifyGroupField(
-    index: number,
-    field: keyof PreclassifyGroupForm,
-    value: string
-  ) {
-    setPreclassifyGroups((prev) =>
-      prev.map((group, i) =>
-        i === index
-          ? {
-              ...group,
-              [field]: value,
-            }
-          : group
+  function findContainerOfCard(cardId: string): DragContainerId | null {
+    if (ungroupedCardIds.includes(cardId)) return UNGROUPED_ID
+    const group = preclassifyGroups.find((g) => g.cardIds.includes(cardId))
+    return group ? group.id : null
+  }
+
+  function moveCard(cardId: string, toContainerId: DragContainerId) {
+    const fromContainerId = findContainerOfCard(cardId)
+    if (!fromContainerId || fromContainerId === toContainerId) return
+
+    if (fromContainerId === UNGROUPED_ID) {
+      setUngroupedCardIds((prev) => prev.filter((id) => id !== cardId))
+    } else {
+      setPreclassifyGroups((prev) =>
+        prev.map((group) =>
+          group.id === fromContainerId
+            ? { ...group, cardIds: group.cardIds.filter((id) => id !== cardId) }
+            : group
+        )
       )
-    )
+    }
+
+    if (toContainerId === UNGROUPED_ID) {
+      setUngroupedCardIds((prev) => [...prev, cardId])
+    } else {
+      setPreclassifyGroups((prev) =>
+        prev.map((group) =>
+          group.id === toContainerId
+            ? { ...group, cardIds: [...group.cardIds, cardId] }
+            : group
+        )
+      )
+    }
+
+    setCardMoveCount((prev) => prev + 1)
     setPreclassifyEditCount((prev) => prev + 1)
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const activeId = String(event.active.id)
+    const overId = event.over?.id ? String(event.over.id) : null
+    if (!overId) return
+
+    const isGroup = preclassifyGroups.some((g) => g.id === overId)
+    const targetContainerId: DragContainerId =
+      overId === UNGROUPED_ID
+        ? UNGROUPED_ID
+        : isGroup
+          ? overId
+          : findContainerOfCard(overId) ?? UNGROUPED_ID
+
+    moveCard(activeId, targetContainerId)
   }
 
   async function handleStart() {
@@ -130,6 +271,11 @@ export default function Home() {
       return
     }
 
+    if (ungroupedCardIds.length > 0) {
+      setStatus('還有生物卡尚未分群')
+      return
+    }
+
     if (!preclassifyOverallReason.trim()) {
       setStatus('請先填寫整體分類理由')
       return
@@ -141,8 +287,8 @@ export default function Home() {
         setStatus(`第 ${i + 1} 組尚未填寫群組名稱`)
         return
       }
-      if (!group.itemsText.trim()) {
-        setStatus(`第 ${i + 1} 組尚未填寫包含哪些生物`)
+      if (group.cardIds.length === 0) {
+        setStatus(`第 ${i + 1} 組目前沒有生物卡`)
         return
       }
       if (!group.reason.trim()) {
@@ -156,7 +302,7 @@ export default function Home() {
     const { error: summaryError } = await supabase.from('preclassify_summary').insert([
       {
         session_id: sessionId,
-        group_count: preclassifyGroupCount,
+        group_count: preclassifyGroups.length,
         edit_count: preclassifyEditCount,
         overall_reason: preclassifyOverallReason.trim(),
       },
@@ -171,7 +317,7 @@ export default function Home() {
       session_id: sessionId,
       group_no: index + 1,
       group_name: group.groupName.trim(),
-      items_text: group.itemsText.trim(),
+      items_text: group.cardIds.join(', '),
       reason: group.reason.trim(),
     }))
 
@@ -281,7 +427,6 @@ export default function Home() {
     }
 
     const firstInference = inferMisconception(answer, reason, currentCompareQuestion)
-
     const variant = firstInference.code ?? 'correct'
     const routedFeedback =
       firstInference.code === null
@@ -294,7 +439,6 @@ export default function Home() {
     setFirstMisconceptionCode(firstInference.code)
     setFeedbackVariant(variant)
     setFeedbackText(routedFeedback)
-
     setAnswer('')
     setReason('')
     setCompareStep('feedback')
@@ -475,15 +619,92 @@ export default function Home() {
     setStatus('saved，已進入下一題')
   }
 
+  function renderOptions(options: string[]) {
+    return (
+      <div className="space-y-2">
+        {options.map((option) => (
+          <label key={option} className="flex items-center gap-2 rounded border p-3">
+            <input
+              type="radio"
+              name="answer"
+              value={option}
+              checked={answer === option}
+              onChange={(e) => setAnswer(e.target.value)}
+            />
+            <span>{option}</span>
+          </label>
+        ))}
+      </div>
+    )
+  }
+
+  function renderQuestionBlock(question: {
+    id: string
+    prompt: string
+    stimulusText?: string
+    imageUrl?: string | null
+    options: string[]
+    targetFeature: string
+  }) {
+    return (
+      <div className="space-y-4 rounded-xl border bg-white p-5">
+        <div className="space-y-2">
+          <p className="text-sm text-gray-500">題號：{question.id}</p>
+          <h2 className="text-xl font-semibold">{question.prompt}</h2>
+          {question.stimulusText ? <p className="text-gray-700">{question.stimulusText}</p> : null}
+          {question.imageUrl ? (
+            <div className="relative aspect-video w-full overflow-hidden rounded bg-gray-100">
+              <Image src={question.imageUrl} alt={question.prompt} fill className="object-contain" />
+            </div>
+          ) : null}
+        </div>
+
+        {renderOptions(question.options)}
+
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">理由</label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="請寫出你的判斷理由"
+            className="min-h-28 w-full rounded border px-3 py-2"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">信心（1～5）</label>
+          <select
+            value={confidence}
+            onChange={(e) => setConfidence(e.target.value)}
+            className="rounded border px-3 py-2"
+          >
+            <option value="1">1 非常不確定</option>
+            <option value="2">2</option>
+            <option value="3">3 普通</option>
+            <option value="4">4</option>
+            <option value="5">5 非常確定</option>
+          </select>
+        </div>
+
+        <div className="rounded bg-gray-50 p-3 text-sm text-gray-700">
+          <span className="font-medium">研究者核心特徵：</span>
+          {question.targetFeature}
+        </div>
+      </div>
+    )
+  }
+
   if (phase === 'start') {
     return (
       <main className="mx-auto max-w-3xl space-y-6 p-6">
-        <h1 className="text-2xl font-bold">動物分類學習網站 MVP</h1>
-        <p className="text-sm text-gray-600">
-          目前版本：第 1 階段預分類（簡化版）＋ 第 2 階段證據分類 ＋ 第 3 階段分流回饋 ＋ 第 4 階段遷移測驗骨架
-        </p>
+        <header className="space-y-2">
+          <h1 className="text-3xl font-bold">動物分類學習網站 MVP</h1>
+          <p className="text-gray-700">
+            目前版本：第 1 階段預分類（拖曳圖片版）＋ 第 2 階段證據分類 ＋ 第 3 階段對比式回饋 ＋ 第 4 階段遷移測驗
+          </p>
+        </header>
 
-        <div className="space-y-2">
+        <section className="space-y-3 rounded-xl border bg-white p-5">
           <label className="block text-sm font-medium">Participant Code</label>
           <input
             value={participantCode}
@@ -491,110 +712,111 @@ export default function Home() {
             placeholder="例如：A001"
             className="w-full rounded border px-3 py-2"
           />
-        </div>
-
-        <button
-          onClick={handleStart}
-          className="rounded bg-black px-4 py-2 text-white"
-        >
-          開始作答
-        </button>
-
-        <p>{status}</p>
+          <button
+            onClick={handleStart}
+            className="rounded bg-black px-4 py-2 text-white"
+          >
+            開始作答
+          </button>
+          <p>{status}</p>
+        </section>
       </main>
     )
   }
 
   if (phase === 'preclassify') {
     return (
-      <main className="mx-auto max-w-5xl space-y-6 p-6">
-        <h1 className="text-2xl font-bold">第 1 階段：預分類（簡化版）</h1>
+      <main className="mx-auto max-w-6xl space-y-6 p-6">
+        <h1 className="text-2xl font-bold">第 1 階段：預分類（拖曳圖片版）</h1>
 
         <div className="space-y-1 text-sm text-gray-600">
           <p>participant code：{participantCode}</p>
           <p>請先自由分群，不先看標準答案。</p>
           <p>目前修改次數近似值：{preclassifyEditCount}</p>
+          <p>目前群組數：{preclassifyGroups.length}</p>
+          <p>群組建立次數（含初始兩組）：{groupCreateCount}</p>
+          <p>卡片移動次數：{cardMoveCount}</p>
         </div>
 
-        <section className="grid gap-6 md:grid-cols-2">
-          <div className="space-y-4 rounded border p-4">
-            <h2 className="text-lg font-semibold">本階段生物卡（P1–P10）</h2>
-            <div className="grid grid-cols-2 gap-2">
-              {preclassifyCards.map((card) => (
-                <div key={card.id} className="rounded border p-2 text-sm">
-                  <p className="font-medium">{card.id}</p>
-                  <p>{card.name}</p>
-                </div>
-              ))}
-            </div>
-            <p className="text-sm text-gray-600">
-              簡化版作法：請直接輸入每組包含哪些生物編號或名稱，例如：
-              P1, P2, 水母, 海葵
-            </p>
-          </div>
-
-          <div className="space-y-4 rounded border p-4">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium">你想分成幾組？</label>
-              <select
-                value={preclassifyGroupCount}
-                onChange={(e) => resizePreclassifyGroups(Number(e.target.value))}
-                className="rounded border px-3 py-2"
-              >
-                <option value="2">2 組</option>
-                <option value="3">3 組</option>
-                <option value="4">4 組</option>
-                <option value="5">5 組</option>
-              </select>
-            </div>
+        <DndContext onDragEnd={handleDragEnd}>
+          <section className="space-y-6">
+            <DropContainer id={UNGROUPED_ID} title="待分類生物卡">
+              {ungroupedCardIds.map((cardId) => {
+                const card = cardMap[cardId]
+                return (
+                  <DraggableAnimalCard
+                    key={card.id}
+                    id={card.id}
+                    name={card.name}
+                    imageUrl={card.imageUrl}
+                  />
+                )
+              })}
+            </DropContainer>
 
             <div className="space-y-4">
-              {preclassifyGroups.map((group, index) => (
-                <div key={index} className="space-y-3 rounded border p-3">
-                  <h3 className="font-medium">第 {index + 1} 組</h3>
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">你的群組</h2>
+                <button
+                  onClick={addPreclassifyGroup}
+                  className="rounded border px-3 py-2 text-sm"
+                >
+                  新增群組
+                </button>
+              </div>
 
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium">群組名稱</label>
-                    <input
-                      value={group.groupName}
-                      onChange={(e) =>
-                        updatePreclassifyGroupField(index, 'groupName', e.target.value)
-                      }
-                      placeholder="例如：有觸手的、身體柔軟的"
-                      className="w-full rounded border px-3 py-2"
-                    />
-                  </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {preclassifyGroups.map((group, index) => (
+                  <div key={group.id} className="space-y-3 rounded-xl border bg-white p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <input
+                        value={group.groupName}
+                        onChange={(e) =>
+                          updatePreclassifyGroupName(group.id, e.target.value)
+                        }
+                        className="w-full rounded border px-3 py-2"
+                      />
+                      <button
+                        onClick={() => deleteEmptyGroup(group.id)}
+                        className="rounded border px-3 py-2 text-sm"
+                      >
+                        刪除空組
+                      </button>
+                    </div>
 
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium">
-                      這組包含哪些生物？
-                    </label>
-                    <textarea
-                      value={group.itemsText}
-                      onChange={(e) =>
-                        updatePreclassifyGroupField(index, 'itemsText', e.target.value)
-                      }
-                      placeholder="請輸入生物編號或名稱，用逗號分隔"
-                      className="min-h-20 w-full rounded border px-3 py-2"
-                    />
-                  </div>
+                    <p className="text-sm text-gray-500">第 {index + 1} 組</p>
 
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium">你為什麼這樣分？</label>
-                    <textarea
-                      value={group.reason}
-                      onChange={(e) =>
-                        updatePreclassifyGroupField(index, 'reason', e.target.value)
-                      }
-                      placeholder="請寫這組的分類理由"
-                      className="min-h-20 w-full rounded border px-3 py-2"
-                    />
+                    <DropContainer id={group.id} title="拖曳卡片到這一組">
+                      {group.cardIds.map((cardId) => {
+                        const card = cardMap[cardId]
+                        return (
+                          <DraggableAnimalCard
+                            key={card.id}
+                            id={card.id}
+                            name={card.name}
+                            imageUrl={card.imageUrl}
+                          />
+                        )
+                      })}
+                    </DropContainer>
+
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium">這組的分類理由</label>
+                      <textarea
+                        value={group.reason}
+                        onChange={(e) =>
+                          updatePreclassifyGroupReason(group.id, e.target.value)
+                        }
+                        placeholder="請說明你為什麼把這些生物分在一起"
+                        className="min-h-24 w-full rounded border px-3 py-2"
+                      />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 rounded-xl border bg-white p-4">
               <label className="block text-sm font-medium">整體分類理由</label>
               <textarea
                 value={preclassifyOverallReason}
@@ -603,7 +825,7 @@ export default function Home() {
                   setPreclassifyEditCount((prev) => prev + 1)
                 }}
                 placeholder="請說明你整體上是依什麼規則分群"
-                className="min-h-24 w-full rounded border px-3 py-2"
+                className="min-h-28 w-full rounded border px-3 py-2"
               />
             </div>
 
@@ -615,311 +837,129 @@ export default function Home() {
             </button>
 
             <p>{status}</p>
-          </div>
-        </section>
+          </section>
+        </DndContext>
       </main>
     )
   }
 
   if (phase === 'evidence') {
     return (
-      <main className="mx-auto max-w-2xl space-y-6 p-6">
-        <h1 className="text-2xl font-bold">第 2 階段：證據分類</h1>
+      <main className="mx-auto max-w-4xl space-y-6 p-6">
+        <header className="space-y-1">
+          <h1 className="text-2xl font-bold">第 2 階段：證據分類</h1>
+          <p className="text-sm text-gray-600">
+            第 {evidenceIndex + 1} / {evidenceQuestions.length} 題
+          </p>
+        </header>
 
-        <div className="space-y-1 text-sm text-gray-600">
-          <p>participant code：{participantCode}</p>
-          <p>第 {evidenceIndex + 1} 題 / 共 {evidenceQuestions.length} 題</p>
-          <p>題號：{currentEvidenceQuestion.id}</p>
-          <p>表徵型式：{currentEvidenceQuestion.representationType}</p>
-          <p>核心診斷特徵：{currentEvidenceQuestion.targetFeature}</p>
-        </div>
+        {renderQuestionBlock(currentEvidenceQuestion)}
 
-        <section className="space-y-4 rounded border p-4">
-          <div className="space-y-2">
-            <h2 className="text-xl font-semibold">{currentEvidenceQuestion.prompt}</h2>
-            {currentEvidenceQuestion.stimulusText ? (
-              <p className="text-sm text-gray-700">{currentEvidenceQuestion.stimulusText}</p>
-            ) : null}
-          </div>
+        <button
+          onClick={handleEvidenceSubmit}
+          className="rounded bg-black px-4 py-2 text-white"
+        >
+          送出本題
+        </button>
 
-          <fieldset className="space-y-3">
-            <legend className="text-sm font-medium">請選擇你的答案</legend>
-            {currentEvidenceQuestion.options.map((option) => (
-              <label key={option} className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="evidence-answer"
-                  value={option}
-                  checked={answer === option}
-                  onChange={(e) => setAnswer(e.target.value)}
-                />
-                <span>{option}</span>
-              </label>
-            ))}
-          </fieldset>
-
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">請寫下你的理由</label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="請根據主要構造與特徵說明你的判斷"
-              className="min-h-28 w-full rounded border px-3 py-2"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">你的信心程度</label>
-            <select
-              value={confidence}
-              onChange={(e) => setConfidence(e.target.value)}
-              className="rounded border px-3 py-2"
-            >
-              <option value="1">1 分：完全不確定</option>
-              <option value="2">2 分：不太確定</option>
-              <option value="3">3 分：普通</option>
-              <option value="4">4 分：大致確定</option>
-              <option value="5">5 分：非常確定</option>
-            </select>
-          </div>
-
-          <button onClick={handleEvidenceSubmit} className="rounded bg-black px-4 py-2 text-white">
-            {evidenceIndex === evidenceQuestions.length - 1 ? '送出並進入第 3 階段' : '送出本題'}
-          </button>
-
-          <p>{status}</p>
-        </section>
+        <p>{status}</p>
       </main>
     )
   }
 
   if (phase === 'compare') {
     return (
-      <main className="mx-auto max-w-2xl space-y-6 p-6">
-        <h1 className="text-2xl font-bold">第 3 階段：對比式回饋</h1>
+      <main className="mx-auto max-w-4xl space-y-6 p-6">
+        <header className="space-y-1">
+          <h1 className="text-2xl font-bold">第 3 階段：對比式回饋</h1>
+          <p className="text-sm text-gray-600">
+            第 {compareIndex + 1} / {compareQuestions.length} 題
+          </p>
+        </header>
 
-        <div className="space-y-1 text-sm text-gray-600">
-          <p>participant code：{participantCode}</p>
-          <p>第 {compareIndex + 1} 題 / 共 {compareQuestions.length} 題</p>
-          <p>題號：{currentCompareQuestion.id}</p>
-          <p>目前步驟：{compareStep}</p>
-          <p>對比焦點：{currentCompareQuestion.compareFocus}</p>
-        </div>
+        {compareStep === 'first_answer' ? (
+          <section className="space-y-4">
+            <div className="rounded bg-blue-50 p-3 text-sm text-blue-900">
+              先作首答，再閱讀回饋，最後重新改答。
+            </div>
+            {renderQuestionBlock(currentCompareQuestion)}
+            <button
+              onClick={handleCompareFirstAnswerNext}
+              className="rounded bg-black px-4 py-2 text-white"
+            >
+              送出首答，查看回饋
+            </button>
+          </section>
+        ) : null}
 
-        <section className="space-y-4 rounded border p-4">
-          <div className="space-y-2">
-            <h2 className="text-xl font-semibold">{currentCompareQuestion.prompt}</h2>
-            {currentCompareQuestion.stimulusText ? (
-              <p className="text-sm text-gray-700">{currentCompareQuestion.stimulusText}</p>
-            ) : null}
-          </div>
+        {compareStep === 'feedback' ? (
+          <section className="space-y-4 rounded-xl border bg-white p-5">
+            <h2 className="text-xl font-semibold">回饋</h2>
+            <p className="text-sm text-gray-500">回饋分流代碼：{feedbackVariant}</p>
+            <div className="space-y-2 rounded bg-yellow-50 p-4">
+              <p className="font-medium">首答：{firstAnswer}</p>
+              <p className="text-gray-700">首答理由：{firstReason}</p>
+            </div>
+            <div className="rounded bg-gray-50 p-4">
+              <p className="whitespace-pre-wrap text-gray-800">{feedbackText}</p>
+            </div>
+            <button
+              onClick={handleCompareFeedbackNext}
+              className="rounded bg-black px-4 py-2 text-white"
+            >
+              進入改答
+            </button>
+          </section>
+        ) : null}
 
-          {compareStep === 'first_answer' ? (
-            <>
-              <fieldset className="space-y-3">
-                <legend className="text-sm font-medium">請先作第一次判斷</legend>
-                {currentCompareQuestion.options.map((option) => (
-                  <label key={option} className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="compare-first-answer"
-                      value={option}
-                      checked={answer === option}
-                      onChange={(e) => setAnswer(e.target.value)}
-                    />
-                    <span>{option}</span>
-                  </label>
-                ))}
-              </fieldset>
+        {compareStep === 'final_answer' ? (
+          <section className="space-y-4">
+            <div className="rounded bg-green-50 p-3 text-sm text-green-900">
+              請根據回饋重新作答。
+            </div>
+            {renderQuestionBlock(currentCompareQuestion)}
+            <button
+              onClick={handleCompareFinalSubmit}
+              className="rounded bg-black px-4 py-2 text-white"
+            >
+              送出改答
+            </button>
+          </section>
+        ) : null}
 
-              <div className="space-y-2">
-                <label className="block text-sm font-medium">第一次作答理由</label>
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="請寫下你第一次的判斷理由"
-                  className="min-h-28 w-full rounded border px-3 py-2"
-                />
-              </div>
-
-              <button
-                onClick={handleCompareFirstAnswerNext}
-                className="rounded bg-black px-4 py-2 text-white"
-              >
-                查看對比式回饋
-              </button>
-            </>
-          ) : null}
-
-          {compareStep === 'feedback' ? (
-            <>
-              <div className="space-y-2 rounded border bg-gray-50 p-4">
-                <p className="text-sm font-medium text-gray-500">
-                  對比式回饋（分流版本：{feedbackVariant}）
-                </p>
-                <p>{feedbackText}</p>
-              </div>
-
-              <button
-                onClick={handleCompareFeedbackNext}
-                className="rounded bg-black px-4 py-2 text-white"
-              >
-                進行改答
-              </button>
-            </>
-          ) : null}
-
-          {compareStep === 'final_answer' ? (
-            <>
-              <div className="space-y-2 rounded border bg-gray-50 p-3 text-sm">
-                <p>第一次答案：{firstAnswer}</p>
-                <p>第一次理由：{firstReason}</p>
-                <p>第一次迷思代碼：{firstMisconceptionCode ?? 'correct'}</p>
-                <p>回饋版本：{feedbackVariant}</p>
-              </div>
-
-              <fieldset className="space-y-3">
-                <legend className="text-sm font-medium">請根據回饋重新作答</legend>
-                {currentCompareQuestion.options.map((option) => (
-                  <label key={option} className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="compare-final-answer"
-                      value={option}
-                      checked={answer === option}
-                      onChange={(e) => setAnswer(e.target.value)}
-                    />
-                    <span>{option}</span>
-                  </label>
-                ))}
-              </fieldset>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-medium">改答理由</label>
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="請寫下你修改或維持原判斷的理由"
-                  className="min-h-28 w-full rounded border px-3 py-2"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-medium">你的信心程度</label>
-                <select
-                  value={confidence}
-                  onChange={(e) => setConfidence(e.target.value)}
-                  className="rounded border px-3 py-2"
-                >
-                  <option value="1">1 分：完全不確定</option>
-                  <option value="2">2 分：不太確定</option>
-                  <option value="3">3 分：普通</option>
-                  <option value="4">4 分：大致確定</option>
-                  <option value="5">5 分：非常確定</option>
-                </select>
-              </div>
-
-              <button
-                onClick={handleCompareFinalSubmit}
-                className="rounded bg-black px-4 py-2 text-white"
-              >
-                {compareIndex === compareQuestions.length - 1 ? '送出並進入第 4 階段' : '送出改答'}
-              </button>
-            </>
-          ) : null}
-
-          <p>{status}</p>
-        </section>
+        <p>{status}</p>
       </main>
     )
   }
 
   if (phase === 'transfer') {
     return (
-      <main className="mx-auto max-w-2xl space-y-6 p-6">
-        <h1 className="text-2xl font-bold">第 4 階段：遷移測驗</h1>
+      <main className="mx-auto max-w-4xl space-y-6 p-6">
+        <header className="space-y-1">
+          <h1 className="text-2xl font-bold">第 4 階段：遷移測驗</h1>
+          <p className="text-sm text-gray-600">
+            第 {transferIndex + 1} / {transferQuestions.length} 題
+          </p>
+        </header>
 
-        <div className="space-y-1 text-sm text-gray-600">
-          <p>participant code：{participantCode}</p>
-          <p>第 {transferIndex + 1} 題 / 共 {transferQuestions.length} 題</p>
-          <p>題號：{currentTransferQuestion.id}</p>
-          <p>表徵型式：{currentTransferQuestion.representationType}</p>
-          <p>核心診斷特徵：{currentTransferQuestion.targetFeature}</p>
-        </div>
+        {renderQuestionBlock(currentTransferQuestion)}
 
-        <section className="space-y-4 rounded border p-4">
-          <div className="space-y-2">
-            <h2 className="text-xl font-semibold">{currentTransferQuestion.prompt}</h2>
-            {currentTransferQuestion.stimulusText ? (
-              <p className="text-sm text-gray-700">{currentTransferQuestion.stimulusText}</p>
-            ) : null}
+        <button
+          onClick={handleTransferSubmit}
+          className="rounded bg-black px-4 py-2 text-white"
+        >
+          送出本題
+        </button>
 
-            {currentTransferQuestion.representationType !== 'text' ? (
-              <div className="rounded border border-dashed p-3 text-sm text-gray-500">
-                此題預留圖片／新表徵區塊，之後可補圖片資源。
-              </div>
-            ) : null}
-          </div>
-
-          <fieldset className="space-y-3">
-            <legend className="text-sm font-medium">請選擇你的答案</legend>
-            {currentTransferQuestion.options.map((option) => (
-              <label key={option} className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="transfer-answer"
-                  value={option}
-                  checked={answer === option}
-                  onChange={(e) => setAnswer(e.target.value)}
-                />
-                <span>{option}</span>
-              </label>
-            ))}
-          </fieldset>
-
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">請寫下你的理由</label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="請說明你如何把已學到的規則用在這題"
-              className="min-h-28 w-full rounded border px-3 py-2"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">你的信心程度</label>
-            <select
-              value={confidence}
-              onChange={(e) => setConfidence(e.target.value)}
-              className="rounded border px-3 py-2"
-            >
-              <option value="1">1 分：完全不確定</option>
-              <option value="2">2 分：不太確定</option>
-              <option value="3">3 分：普通</option>
-              <option value="4">4 分：大致確定</option>
-              <option value="5">5 分：非常確定</option>
-            </select>
-          </div>
-
-          <button onClick={handleTransferSubmit} className="rounded bg-black px-4 py-2 text-white">
-            {transferIndex === transferQuestions.length - 1 ? '送出並完成' : '送出本題'}
-          </button>
-
-          <p>{status}</p>
-        </section>
+        <p>{status}</p>
       </main>
     )
   }
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6">
-      <h1 className="text-2xl font-bold">作答完成</h1>
-      <p>participant code：{participantCode}</p>
-      <p>已完成第 1 階段預分類。</p>
-      <p>已完成第 2 階段 {evidenceQuestions.length} 題。</p>
-      <p>已完成第 3 階段 {compareQuestions.length} 題。</p>
-      <p>已完成第 4 階段 {transferQuestions.length} 題。</p>
+      <h1 className="text-3xl font-bold">作答完成</h1>
+      <p>已完成所有階段，資料已送出。</p>
       <p>{status}</p>
     </main>
   )
