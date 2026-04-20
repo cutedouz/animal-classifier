@@ -369,32 +369,34 @@ function StepHeader({
   maxUnlockedIndex: number
 }) {
   return (
-    <div className="mb-2 rounded-2xl border border-gray-200 bg-white px-2 py-2">
-      <div className="flex flex-wrap gap-1.5">
-        {STAGE_ITEMS.map((item, index) => {
-          const active = stage === item.key
-          const locked = index > maxUnlockedIndex
+    <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-2 shadow-sm">
+      <div className="overflow-x-auto">
+        <div className="flex min-w-max gap-2">
+          {STAGE_ITEMS.map((item, index) => {
+            const active = stage === item.key
+            const locked = index > maxUnlockedIndex
 
-          return (
-            <button
-              key={item.key}
-              type="button"
-              disabled={locked}
-              onClick={() => {
-                if (!locked) setStage(item.key)
-              }}
-              className={`rounded-xl border px-3 py-1.5 text-xs font-semibold md:text-sm ${
-                active
-                  ? 'border-black bg-black text-white'
-                  : locked
-                    ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
-                    : 'border-gray-300 bg-white text-gray-700'
-              }`}
-            >
-              {index + 1}. {item.label}
-            </button>
-          )
-        })}
+            return (
+              <button
+                key={item.key}
+                type="button"
+                disabled={locked}
+                onClick={() => {
+                  if (!locked) setStage(item.key)
+                }}
+                className={`whitespace-nowrap rounded-xl border px-3 py-2 text-xs font-semibold md:text-sm ${
+                  active
+                    ? 'border-black bg-black text-white'
+                    : locked
+                      ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
+                      : 'border-gray-300 bg-white text-gray-700'
+                }`}
+              >
+                {index + 1}. {item.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -482,15 +484,19 @@ function QuestionCard({
   imageUrl: string | null
 }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
       <div className="mb-2 text-sm font-semibold text-gray-500">{title}</div>
-      <div className="mb-3 text-xl font-bold text-gray-900">{prompt}</div>
+      <div className="mb-3 text-xl font-bold text-gray-900 sm:text-2xl">{prompt}</div>
       <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
         {stimulusText}
       </div>
       {imageUrl ? (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-3">
-          <img src={imageUrl} alt={prompt} className="h-56 w-full object-contain" />
+          <img
+            src={imageUrl}
+            alt={prompt}
+            className="h-48 w-full object-contain sm:h-56"
+          />
         </div>
       ) : null}
     </div>
@@ -505,7 +511,7 @@ function SummaryBlock({
   children: ReactNode
 }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5">
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
       <h3 className="mb-3 text-xl font-black text-gray-900">{title}</h3>
       <div className="text-sm leading-6 text-gray-700">{children}</div>
     </div>
@@ -570,11 +576,14 @@ export default function Page() {
   const [evidenceConfidence, setEvidenceConfidence] = useState(2)
   const [evidenceResponses, setEvidenceResponses] = useState<EvidenceResponse[]>([])
 
+  const [selectedMovePayload, setSelectedMovePayload] = useState<DragPayload | null>(null)
+
   const currentEvidence = evidenceQuestions[evidenceIndex]
-  
+
   const [progressHydrated, setProgressHydrated] = useState(false)
 
   const awarenessStartedAtRef = useRef<number | null>(null)
+  const awarenessBaseSecondsRef = useRef(0)
   const lastSubmittedHashRef = useRef('')
   const retryTimerRef = useRef<number | null>(null)
 
@@ -700,24 +709,24 @@ export default function Page() {
   ])
 
   useEffect(() => {
-    if (stage === 'awareness') {
-      if (awarenessStartedAtRef.current === null) {
-        awarenessStartedAtRef.current = Date.now()
-      }
-      const timer = window.setInterval(() => {
-        if (awarenessStartedAtRef.current !== null) {
-          const delta = Math.floor((Date.now() - awarenessStartedAtRef.current) / 1000)
-          setAwarenessSecondsSpent((prev) => Math.max(prev, prev + 1, delta + prev))
-        }
-      }, 1000)
-
-      return () => {
-        window.clearInterval(timer)
-      }
+    if (stage !== 'awareness') {
+      awarenessStartedAtRef.current = null
+      return
     }
 
-    awarenessStartedAtRef.current = null
-    return undefined
+    awarenessBaseSecondsRef.current = awarenessSecondsSpent
+    awarenessStartedAtRef.current = Date.now()
+
+    const timer = window.setInterval(() => {
+      if (awarenessStartedAtRef.current === null) return
+
+      const delta = Math.floor((Date.now() - awarenessStartedAtRef.current) / 1000)
+      setAwarenessSecondsSpent(awarenessBaseSecondsRef.current + delta)
+    }, 1000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
   }, [stage])
 
   const nonEmptyGroups = useMemo(
@@ -856,7 +865,7 @@ export default function Page() {
     setDiagnosticFeatures((prev) => prev.filter((item) => item !== feature))
   }
 
-  function handleReadinessAnswer(questionId: string, option: string, correct: string) {
+  function handleReadinessAnswer(questionId: string, option: string) {
     setReadinessAttemptCounts((prev) => ({
       ...prev,
       [questionId]: (prev[questionId] ?? 0) + 1,
@@ -894,6 +903,26 @@ export default function Page() {
     setBankCardIds(nextBankIds)
     setGroups(nextGroups)
     setCardMoveCount((count) => count + 1)
+  }
+
+  function handleTapMoveToGroup(targetGroupId: string) {
+    if (!selectedMovePayload) return
+    handleDropOnGroup(targetGroupId, selectedMovePayload)
+    setSelectedMovePayload(null)
+  }
+
+  function handleTapMoveToBank() {
+    if (!selectedMovePayload) return
+    handleDropOnBank(selectedMovePayload)
+    setSelectedMovePayload(null)
+  }
+
+  function isSelectedCard(cardId: string, source: 'bank' | 'group', sourceGroupId?: string) {
+    return (
+      selectedMovePayload?.cardId === cardId &&
+      selectedMovePayload?.source === source &&
+      selectedMovePayload?.sourceGroupId === sourceGroupId
+    )
   }
 
   function resetEvidenceForm() {
@@ -958,7 +987,7 @@ export default function Page() {
     () => ({
       participantCode,
       participant: enterSession,
-      version: 'v5-six-phyla-auto-save-auto-submit',
+      version: 'v6-responsive-touch-friendly',
       stage1: {
         groups,
         bankCardIds,
@@ -1069,73 +1098,124 @@ export default function Page() {
   }, [stage, submissionKey, participantCode, enterSession, exportPayload, exportHash])
 
   return (
-    <main className="h-screen overflow-hidden bg-gray-50 px-4 py-3 md:px-6">
-      <div className="mx-auto flex h-full max-w-7xl flex-col">
-        <div className="mb-2 flex items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-black tracking-tight text-gray-900 md:text-3xl">
-              Sci-Flipper 動物分類學習網站
-            </h1>
-            <div className="mt-1 text-sm text-gray-600">
-              目前學生：
-              {enterSession
-                ? `${enterSession.maskedName ?? '未顯示姓名'}｜${enterSession.grade} 年級 ${enterSession.className} 班 ${enterSession.seatNo} 號`
-                : '尚未讀到進入資訊'}
+    <main className="min-h-screen bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 md:px-6">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col">
+        <div className="mb-3 rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-gray-900 sm:text-3xl">
+                Sci-Flipper 動物分類學習網站
+              </h1>
+              <div className="mt-1 text-sm leading-6 text-gray-600">
+                目前學生：
+                {enterSession
+                  ? `${enterSession.maskedName ?? '未顯示姓名'}｜${enterSession.grade} 年級 ${enterSession.className} 班 ${enterSession.seatNo} 號`
+                  : '尚未讀到進入資訊'}
+              </div>
             </div>
           </div>
         </div>
 
         <StepHeader stage={stage} setStage={setStage} maxUnlockedIndex={maxUnlockedIndex} />
 
-        <div className="min-h-0 flex-1">
+        <div className="flex-1">
           {stage === 'stage1' && (
-            <section className="grid h-full min-h-0 gap-3 xl:grid-cols-[1.15fr_0.85fr]">
-              <div className="flex min-h-0 flex-col rounded-2xl border border-gray-200 bg-white p-3">
-                <div className="mb-3 flex items-start justify-between gap-3">
+            <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h2 className="text-2xl font-black text-gray-900 md:text-3xl">
                       第 1 階段：自由預分類
                     </h2>
-                    <div className="mt-1 text-xs leading-5 text-gray-600 md:text-sm">
+                    <div className="mt-2 text-sm leading-6 text-gray-600">
                       先依照你目前的直覺分類。這一階段不是要你立刻答對，而是把原本的想法說出來。
                     </div>
                   </div>
 
-                  <div className="grid gap-0.5 text-right text-sm text-gray-700">
-                    <div>群組數：{groups.length}</div>
-                    <div>未分類：{bankCardIds.length}</div>
-                    <div>已分組：{groupedCardCount}</div>
+                  <div className="grid grid-cols-3 gap-2 rounded-xl bg-gray-50 p-3 text-center text-xs text-gray-700 sm:text-sm lg:min-w-[220px]">
+                    <div>
+                      <div className="text-gray-500">群組數</div>
+                      <div className="font-bold text-gray-900">{groups.length}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">未分類</div>
+                      <div className="font-bold text-gray-900">{bankCardIds.length}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">已分組</div>
+                      <div className="font-bold text-gray-900">{groupedCardCount}</div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="mb-2 text-xl font-black text-gray-900">待分類生物卡</div>
+                {selectedMovePayload ? (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                    已選取「{getCardName(selectedMovePayload.cardId)}」。請點一下目標群組；
+                    若要放回待分類，點下方待分類區。
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMovePayload(null)}
+                        className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-900"
+                      >
+                        取消選取
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">
+                    桌機可直接拖曳卡片；平板／手機可先點一下卡片，再點要放入的群組。
+                  </div>
+                )}
+
+                <div className="mb-3 text-xl font-black text-gray-900">待分類生物卡</div>
 
                 <div
+                  onClick={handleTapMoveToBank}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault()
                     const payloadRaw = e.dataTransfer.getData('application/json')
                     if (!payloadRaw) return
                     handleDropOnBank(JSON.parse(payloadRaw) as DragPayload)
+                    setSelectedMovePayload(null)
                   }}
-                  className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-gray-200 p-3"
+                  className={`rounded-2xl border p-3 transition ${
+                    selectedMovePayload
+                      ? 'border-amber-300 bg-amber-50'
+                      : 'border-gray-200 bg-white'
+                  }`}
                 >
-                  <div className="grid grid-cols-3 gap-2 md:grid-cols-4 xl:grid-cols-6">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                     {bankCardIds.map((cardId) => {
                       const card = getCardById(cardId)
                       if (!card) return null
 
+                      const active = isSelectedCard(card.id, 'bank')
+
                       return (
-                        <div
+                        <button
                           key={card.id}
+                          type="button"
                           draggable
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedMovePayload({
+                              cardId: card.id,
+                              source: 'bank',
+                            })
+                          }}
                           onDragStart={(e) => {
                             const payload: DragPayload = { cardId: card.id, source: 'bank' }
                             e.dataTransfer.setData('application/json', JSON.stringify(payload))
                           }}
-                          className="cursor-move rounded-xl border border-gray-300 bg-white p-2 transition hover:shadow-sm"
+                          className={`cursor-move rounded-xl border bg-white p-2.5 text-left transition hover:shadow-sm ${
+                            active
+                              ? 'border-amber-400 ring-2 ring-amber-300'
+                              : 'border-gray-300'
+                          }`}
                         >
-                          <div className="mb-2 aspect-square w-full overflow-hidden rounded-lg border border-gray-200 bg-white p-2">
+                          <div className="mb-2 aspect-square w-full overflow-hidden rounded-lg border border-gray-200 bg-white p-1.5 sm:p-2">
                             <img
                               src={card.imageUrl}
                               alt={card.name}
@@ -1143,19 +1223,19 @@ export default function Page() {
                               draggable={false}
                             />
                           </div>
-                          <div className="text-center text-xs font-bold leading-tight text-gray-900 md:text-sm">
+                          <div className="text-center text-[11px] font-bold leading-tight text-gray-900 sm:text-xs md:text-sm">
                             {card.name}
                           </div>
-                        </div>
+                        </button>
                       )
                     })}
                   </div>
                 </div>
               </div>
 
-              <div className="flex min-h-0 flex-col rounded-2xl border border-gray-200 bg-white p-3">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <h2 className="text-xl font-black text-gray-900">你的群組</h2>
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <h2 className="text-2xl font-black text-gray-900">你的群組</h2>
                   <button
                     type="button"
                     disabled={groups.length >= 8}
@@ -1174,130 +1254,149 @@ export default function Page() {
                       ])
                       setGroupCreateCount((count) => count + 1)
                     }}
-                    className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-800 transition hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {groups.length >= 8 ? '已達上限' : '新增群組'}
                   </button>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                  <div className="space-y-2">
-                    {groups.map((group, groupIndex) => (
-                      <div key={group.id} className="rounded-2xl border border-gray-300 p-2">
-                        <div className="mb-2 flex items-center gap-2">
-                          <input
-                            value={group.name}
-                            onChange={(e) => {
-                              const nextName = e.target.value
-                              setGroups((prev) =>
-                                prev.map((item) =>
-                                  item.id === group.id ? { ...item, name: nextName } : item
-                                )
-                              )
-                            }}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
-                          />
-                          <button
-                            type="button"
-                            disabled={group.cardIds.length > 0 || groups.length <= 3}
-                            onClick={() => {
-                              setGroups((prev) => prev.filter((item) => item.id !== group.id))
-                            }}
-                            className="rounded-lg border border-gray-300 px-2 py-2 text-xs text-gray-700 disabled:opacity-40"
-                          >
-                            刪除
-                          </button>
-                        </div>
-
-                        <div className="mb-1 text-xs text-gray-700">第 {groupIndex + 1} 組</div>
-
-                        <div
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={(e) => {
-                            e.preventDefault()
-                            const payloadRaw = e.dataTransfer.getData('application/json')
-                            if (!payloadRaw) return
-                            handleDropOnGroup(group.id, JSON.parse(payloadRaw) as DragPayload)
-                          }}
-                          className="mb-2 min-h-[70px] rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 p-2"
-                        >
-                          {group.cardIds.length === 0 ? (
-                            <div className="flex min-h-[46px] items-center justify-center text-xs font-bold text-gray-700">
-                              拖曳卡片到這一組
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-3 gap-2">
-                              {group.cardIds.map((cardId) => {
-                                const card = getCardById(cardId)
-                                if (!card) return null
-
-                                return (
-                                  <div
-                                    key={card.id}
-                                    draggable
-                                    onDragStart={(e) => {
-                                      const payload: DragPayload = {
-                                        cardId: card.id,
-                                        source: 'group',
-                                        sourceGroupId: group.id,
-                                      }
-                                      e.dataTransfer.setData(
-                                        'application/json',
-                                        JSON.stringify(payload)
-                                      )
-                                    }}
-                                    className="cursor-move rounded-lg border border-gray-300 bg-white p-1.5"
-                                  >
-                                    <div className="mb-1 aspect-square w-full overflow-hidden rounded-md border border-gray-200 bg-white p-1">
-                                      <img
-                                        src={card.imageUrl}
-                                        alt={card.name}
-                                        className="h-full w-full object-contain"
-                                        draggable={false}
-                                      />
-                                    </div>
-                                    <div className="break-words text-center text-[10px] font-bold leading-tight text-gray-900">
-                                      {card.name}
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="mb-1 text-xs font-semibold text-gray-700">分類理由</div>
-                        <textarea
-                          value={group.reason}
+                <div className="space-y-3">
+                  {groups.map((group, groupIndex) => (
+                    <div key={group.id} className="rounded-2xl border border-gray-300 p-3">
+                      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <input
+                          value={group.name}
                           onChange={(e) => {
-                            const nextReason = e.target.value
+                            const nextName = e.target.value
                             setGroups((prev) =>
                               prev.map((item) =>
-                                item.id === group.id ? { ...item, reason: nextReason } : item
+                                item.id === group.id ? { ...item, name: nextName } : item
                               )
                             )
                           }}
-                          placeholder="請說明為什麼分在一起"
-                          className="min-h-[48px] w-full rounded-xl border border-gray-300 px-2 py-2 text-xs leading-5 text-gray-900 placeholder:text-gray-400"
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900"
                         />
+                        <button
+                          type="button"
+                          disabled={group.cardIds.length > 0 || groups.length <= 3}
+                          onClick={() => {
+                            setGroups((prev) => prev.filter((item) => item.id !== group.id))
+                          }}
+                          className="rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-700 disabled:opacity-40"
+                        >
+                          刪除
+                        </button>
                       </div>
-                    ))}
-                  </div>
+
+                      <div className="mb-2 text-xs text-gray-700">第 {groupIndex + 1} 組</div>
+
+                      <div
+                        onClick={() => handleTapMoveToGroup(group.id)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          const payloadRaw = e.dataTransfer.getData('application/json')
+                          if (!payloadRaw) return
+                          handleDropOnGroup(group.id, JSON.parse(payloadRaw) as DragPayload)
+                          setSelectedMovePayload(null)
+                        }}
+                        className={`mb-2 min-h-[88px] rounded-2xl border-2 border-dashed p-2 transition ${
+                          selectedMovePayload
+                            ? 'border-amber-300 bg-amber-50'
+                            : 'border-gray-300 bg-gray-50'
+                        }`}
+                      >
+                        {group.cardIds.length === 0 ? (
+                          <div className="flex min-h-[62px] items-center justify-center text-xs font-bold text-gray-700">
+                            點一下可把已選卡片放到這一組
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                            {group.cardIds.map((cardId) => {
+                              const card = getCardById(cardId)
+                              if (!card) return null
+
+                              const active = isSelectedCard(card.id, 'group', group.id)
+
+                              return (
+                                <button
+                                  key={card.id}
+                                  type="button"
+                                  draggable
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setSelectedMovePayload({
+                                      cardId: card.id,
+                                      source: 'group',
+                                      sourceGroupId: group.id,
+                                    })
+                                  }}
+                                  onDragStart={(e) => {
+                                    const payload: DragPayload = {
+                                      cardId: card.id,
+                                      source: 'group',
+                                      sourceGroupId: group.id,
+                                    }
+                                    e.dataTransfer.setData(
+                                      'application/json',
+                                      JSON.stringify(payload)
+                                    )
+                                  }}
+                                  className={`cursor-move rounded-lg border bg-white p-1.5 ${
+                                    active
+                                      ? 'border-amber-400 ring-2 ring-amber-300'
+                                      : 'border-gray-300'
+                                  }`}
+                                >
+                                  <div className="mb-1 aspect-square w-full overflow-hidden rounded-md border border-gray-200 bg-white p-1">
+                                    <img
+                                      src={card.imageUrl}
+                                      alt={card.name}
+                                      className="h-full w-full object-contain"
+                                      draggable={false}
+                                    />
+                                  </div>
+                                  <div className="break-words text-center text-[10px] font-bold leading-tight text-gray-900 sm:text-xs">
+                                    {card.name}
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mb-1 text-xs font-semibold text-gray-700">分類理由</div>
+                      <textarea
+                        value={group.reason}
+                        onChange={(e) => {
+                          const nextReason = e.target.value
+                          setGroups((prev) =>
+                            prev.map((item) =>
+                              item.id === group.id ? { ...item, reason: nextReason } : item
+                            )
+                          )
+                        }}
+                        placeholder="請說明為什麼分在一起"
+                        className="min-h-[56px] w-full rounded-xl border border-gray-300 px-3 py-2 text-sm leading-6 text-gray-900 placeholder:text-gray-400"
+                      />
+                    </div>
+                  ))}
                 </div>
 
-                <div className="mt-3">
-                  <div className="mb-1 text-sm font-semibold text-gray-700">整體分類想法</div>
+                <div className="mt-4">
+                  <div className="mb-2 text-sm font-semibold text-gray-700">整體分類想法</div>
                   <textarea
                     value={overallReason}
                     onChange={(e) => setOverallReason(e.target.value)}
                     placeholder="請用一句話說明你這次分類的主要思路"
-                    className="min-h-[56px] w-full rounded-xl border border-gray-300 px-3 py-2 text-sm leading-5 text-gray-900"
+                    className="min-h-[88px] w-full rounded-xl border border-gray-300 px-3 py-3 text-sm leading-6 text-gray-900"
                   />
                 </div>
 
-                <div className="mt-3 rounded-xl bg-gray-50 p-2 text-xs leading-5 text-gray-700">
+                <div className="mt-4 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
                   <div>進入下一階段前，請確認：</div>
-                  <ul className="mt-1 list-disc pl-5">
+                  <ul className="mt-2 list-disc pl-5">
                     <li>{bankCardIds.length === 0 ? '已完成' : '尚有卡片未分組'}：所有卡片都已分類</li>
                     <li>{nonEmptyGroups.length >= 2 ? '已完成' : '尚未完成'}：至少形成 2 個非空群組</li>
                     <li>
@@ -1309,12 +1408,12 @@ export default function Page() {
                     <li>{overallReason.trim().length >= 8 ? '已完成' : '尚未完成'}：已寫整體分類想法</li>
                   </ul>
 
-                  <div className="mt-2 flex justify-end">
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:justify-end">
                     <button
                       type="button"
                       disabled={!stage1Complete}
                       onClick={() => setStage('awareness')}
-                      className="rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+                      className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
                     >
                       進入階段 2
                     </button>
@@ -1325,7 +1424,7 @@ export default function Page() {
           )}
 
           {stage === 'awareness' && (
-            <section className="h-full overflow-y-auto space-y-4 pr-1">
+            <section className="space-y-4">
               <SummaryBlock title="上一階段摘要">
                 <div className="space-y-2">
                   {stage1SummaryLines.map((line) => (
@@ -1337,15 +1436,15 @@ export default function Page() {
                 </div>
               </SummaryBlock>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <h2 className="mb-3 text-3xl font-black">第 2 階段：六門規則建立</h2>
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 2 階段：六門規則建立</h2>
                 <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
                   這一階段先建立規則，再進到正式判斷。系統已加入防亂猜機制：
                   選項隨機排序、至少停留 45 秒、可重作但會記錄重試次數。
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                 <h3 className="mb-4 text-2xl font-black">任務 A：回看自己上一階段用過哪些線索</h3>
                 <div className="space-y-5">
                   {bridgeReflectQuestions.map((question) => {
@@ -1389,7 +1488,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                 <h3 className="mb-4 text-2xl font-black">任務 B：區分較穩定與較不穩定的線索</h3>
 
                 <div className="rounded-xl border border-gray-200 p-4">
@@ -1423,7 +1522,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                 <h3 className="mb-4 text-2xl font-black">任務 C：六門提示卡</h3>
                 <div className="mb-4 text-sm leading-6 text-gray-700">
                   這裡明確整理六個門的關鍵特徵與代表生物。第三階段可以繼續參考，不要求死背。
@@ -1436,7 +1535,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                 <h3 className="mb-4 text-2xl font-black">任務 D：就緒檢核</h3>
                 <div className="mb-4 text-sm text-gray-600">
                   選項順序已隨機化。若答錯，請回看提示卡再重作。系統會記錄重試次數，但不直接顯示正確答案位置。
@@ -1467,7 +1566,7 @@ export default function Page() {
                                 type="radio"
                                 name={item.id}
                                 checked={currentValue === option}
-                                onChange={() => handleReadinessAnswer(item.id, option, item.correct)}
+                                onChange={() => handleReadinessAnswer(item.id, option)}
                                 className="mt-1"
                               />
                               <span>{option}</span>
@@ -1508,11 +1607,11 @@ export default function Page() {
                 </label>
               </div>
 
-              <div className="flex justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
                 <button
                   type="button"
                   onClick={() => setStage('stage1')}
-                  className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold"
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
                 >
                   回到階段 1
                 </button>
@@ -1523,7 +1622,7 @@ export default function Page() {
                     setStage('evidence')
                     openEvidenceQuestion(0)
                   }}
-                  className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+                  className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
                 >
                   進入階段 3
                 </button>
@@ -1532,8 +1631,8 @@ export default function Page() {
           )}
 
           {stage === 'evidence' && currentEvidence && (
-            <section className="grid h-full min-h-0 gap-4 xl:grid-cols-[1fr_360px]">
-              <div className="min-h-0 overflow-y-auto space-y-4 pr-1">
+            <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
+              <div className="space-y-4">
                 <SummaryBlock title="前面兩階段摘要">
                   <div className="space-y-2">
                     <div>已形成 {nonEmptyGroups.length} 個非空群組。</div>
@@ -1550,9 +1649,9 @@ export default function Page() {
                   imageUrl={currentEvidence.imageUrl}
                 />
 
-                <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                   <div className="mb-3 text-lg font-black">請選擇門別</div>
-                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-2">
+                  <div className="grid gap-2 md:grid-cols-2">
                     {SIX_PHYLA.map((option) => (
                       <label
                         key={option}
@@ -1605,12 +1704,12 @@ export default function Page() {
                     目前已完成 {evidenceResponses.length} / {evidenceQuestions.length} 題。右側提示卡可隨時參考。
                   </div>
 
-                  <div className="mt-6 flex justify-between gap-3">
-                    <div className="flex gap-3">
+                  <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between">
+                    <div className="flex flex-col gap-3 sm:flex-row">
                       <button
                         type="button"
                         onClick={() => setStage('awareness')}
-                        className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold"
+                        className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
                       >
                         回到階段 2
                       </button>
@@ -1618,7 +1717,7 @@ export default function Page() {
                         type="button"
                         disabled={evidenceIndex === 0}
                         onClick={() => openEvidenceQuestion(evidenceIndex - 1)}
-                        className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                        className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                       >
                         上一題
                       </button>
@@ -1637,7 +1736,7 @@ export default function Page() {
                           setStage('done')
                         }
                       }}
-                      className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+                      className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
                     >
                       {evidenceIndex < evidenceQuestions.length - 1 ? '儲存並下一題' : '完成並查看結果'}
                     </button>
@@ -1645,7 +1744,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <aside className="min-h-0 overflow-y-auto space-y-3">
+              <aside className="space-y-3">
                 <div className="rounded-2xl border border-gray-200 bg-white p-4">
                   <div className="mb-2 text-lg font-black text-gray-900">六門提示卡</div>
                   <div className="text-sm leading-6 text-gray-600">
@@ -1661,9 +1760,9 @@ export default function Page() {
           )}
 
           {stage === 'done' && (
-            <section className="h-full overflow-y-auto space-y-4 pr-1">
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <h2 className="mb-3 text-3xl font-black">第 4 階段：學習結果回饋</h2>
+            <section className="space-y-4">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 4 階段：學習結果回饋</h2>
 
                 <div
                   className={`rounded-xl p-4 text-sm leading-6 ${
@@ -1680,7 +1779,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <SummaryBlock title="階段 1">
                   <div>非空群組：{nonEmptyGroups.length}</div>
                   <div>全部卡片已分類：{bankCardIds.length === 0 ? '是' : '否'}</div>
@@ -1709,7 +1808,7 @@ export default function Page() {
                 </SummaryBlock>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                 <div className="mb-4 text-2xl font-black">逐題結果與回饋</div>
 
                 <div className="space-y-4">
@@ -1755,7 +1854,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="flex justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
                 <button
                   type="button"
                   onClick={() => {
@@ -1764,14 +1863,14 @@ export default function Page() {
                     openEvidenceQuestion(targetIndex)
                     setStage('evidence')
                   }}
-                  className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold"
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
                 >
                   回到階段 3
                 </button>
                 <button
                   type="button"
                   onClick={() => window.location.reload()}
-                  className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white"
+                  className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white sm:w-auto"
                 >
                   重新開始
                 </button>
