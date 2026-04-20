@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   stage1Cards,
   bridgeReflectQuestions,
@@ -33,6 +33,18 @@ type EvidenceResponse = {
 }
 
 type FeatureClassificationValue = 'diagnostic' | 'possible_but_unstable' | ''
+
+type EnterSession = {
+  studentId?: string
+  schoolCode: string
+  schoolYear: string
+  semester: string
+  grade: string
+  className: string
+  seatNo: string
+  maskedName?: string
+  enteredAt?: string
+}
 
 const INITIAL_GROUPS: StageGroup[] = [
   { id: 'G1', name: '群組 1', reason: '', cardIds: [] },
@@ -227,9 +239,35 @@ function SummaryBlock({
 
 export default function Page() {
   const [stage, setStage] = useState<AppStage>('stage1')
+  const [enterSession, setEnterSession] = useState<EnterSession | null>(null)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('animal-classifier-enter-session')
+      if (!raw) return
+
+      const parsed = JSON.parse(raw) as EnterSession
+      setEnterSession(parsed)
+    } catch (error) {
+      console.error('讀取進入活動 session 失敗:', error)
+    }
+  }, [])
 
   // stage 1
-  const [participantCode] = useState('A001')
+  const participantCode =
+    enterSession?.studentId ||
+    [
+      enterSession?.schoolCode,
+      enterSession?.schoolYear,
+      enterSession?.semester,
+      enterSession?.grade,
+      enterSession?.className,
+      enterSession?.seatNo,
+    ]
+      .filter(Boolean)
+      .join('-') ||
+    'anonymous'
+
   const [groups, setGroups] = useState<StageGroup[]>(INITIAL_GROUPS)
   const [bankCardIds, setBankCardIds] = useState<string[]>(stage1Cards.map((card) => card.id))
   const [overallReason, setOverallReason] = useState('')
@@ -399,6 +437,7 @@ export default function Page() {
   const exportPayload = useMemo(
     () => ({
       participantCode,
+      participant: enterSession,
       version: 'v2-four-stage-12-animals-two-column',
       stage1: {
         groups,
@@ -416,6 +455,7 @@ export default function Page() {
     }),
     [
       participantCode,
+      enterSession,
       groups,
       bankCardIds,
       overallReason,
@@ -432,9 +472,17 @@ export default function Page() {
     <main className="h-screen overflow-hidden bg-gray-50 px-4 py-3 md:px-6">
       <div className="mx-auto flex h-full max-w-7xl flex-col">
         <div className="mb-2 flex items-end justify-between gap-3">
-          <h1 className="text-2xl font-black tracking-tight text-gray-900 md:text-3xl">
-            Sci-Flipper 動物分類學習網站
-          </h1>
+          <div>
+            <h1 className="text-2xl font-black tracking-tight text-gray-900 md:text-3xl">
+              Sci-Flipper 動物分類學習網站
+            </h1>
+            <div className="mt-1 text-sm text-gray-600">
+              目前學生：
+              {enterSession
+                ? `${enterSession.maskedName ?? '未顯示姓名'}｜${enterSession.grade} 年級 ${enterSession.className} 班 ${enterSession.seatNo} 號`
+                : '尚未讀到進入資訊'}
+            </div>
+          </div>
         </div>
 
         <StepHeader stage={stage} setStage={setStage} maxUnlockedIndex={maxUnlockedIndex} />
