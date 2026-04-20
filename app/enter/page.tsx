@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 
@@ -33,10 +33,23 @@ type LookupResult = {
   maskedName: string
 }
 
+type EntryMode = 'roster' | 'manual'
+
+type SchoolOption = {
+  value: string
+  label: string
+  county?: string
+  sortOrder: number
+}
+
 const TARGET_PATH = '/'
 const FIXED_SCHOOL_YEAR = '114'
 const FIXED_SEMESTER = '1'
-const SCHOOL_LOADING_TEXT = '載入學校中…'
+const ROSTER_ENTRY_PASSWORD = 'sci'
+
+const LOGO_URL =
+  'https://lh3.googleusercontent.com/d/1c0UMLE6cig4BG247E7ALdODJnNX_-Y6L'
+const LOGO_LINK = 'https://sites.google.com/view/sci-flipper/home'
 
 function unique(values: string[]) {
   return Array.from(new Set(values))
@@ -65,36 +78,45 @@ export default function EnterPage() {
 
   const [rosterRows, setRosterRows] = useState<RosterRow[]>([])
   const [schoolDirectoryRows, setSchoolDirectoryRows] = useState<SchoolDirectoryRow[]>([])
+
   const [isLoadingRoster, setIsLoadingRoster] = useState(true)
   const [rosterLoadError, setRosterLoadError] = useState('')
+  const [schoolLoadError, setSchoolLoadError] = useState('')
 
+  const [entryMode, setEntryMode] = useState<EntryMode>('roster')
+
+  const [schoolKeyword, setSchoolKeyword] = useState('')
   const [schoolCode, setSchoolCode] = useState('')
   const [className, setClassName] = useState('')
   const [seatNo, setSeatNo] = useState('')
+  const [enterPassword, setEnterPassword] = useState('')
+
+  const [manualSchoolName, setManualSchoolName] = useState('')
+  const [manualClassName, setManualClassName] = useState('')
+  const [manualSeatNo, setManualSeatNo] = useState('')
+  const [manualName, setManualName] = useState('')
 
   const [lookupError, setLookupError] = useState('')
   const [matchedStudent, setMatchedStudent] = useState<LookupResult | null>(null)
   const [isLookingUp, setIsLookingUp] = useState(false)
   const [isEntering, setIsEntering] = useState(false)
 
-  // 自訂學校下拉
-  const [schoolDropdownOpen, setSchoolDropdownOpen] = useState(false)
-  const [schoolKeyword, setSchoolKeyword] = useState('')
-  const schoolDropdownRef = useRef<HTMLDivElement | null>(null)
-
   useEffect(() => {
     async function loadData() {
       setIsLoadingRoster(true)
       setRosterLoadError('')
+      setSchoolLoadError('')
 
       try {
         const rosterPromise = supabase
           .from('student_roster_lookup_view')
-          .select('student_id, school_code, class_name, seat_no, masked_name, full_name, active')
+          .select(
+            'student_id, school_code, class_name, seat_no, masked_name, full_name, active'
+          )
           .order('school_code', { ascending: true })
           .order('class_name', { ascending: true })
           .order('seat_no', { ascending: true })
-          .limit(10000) // 🔴 修改點 1：解除預設 1000 筆限制，拉高上限以涵蓋所有學生
+          .limit(10000)
 
         const schoolDirectoryPromise = supabase
           .from('school_directory')
@@ -108,57 +130,57 @@ export default function EnterPage() {
         ])
 
         if (rosterResult.status === 'rejected') {
+          setRosterRows([])
           setRosterLoadError('載入學生名單失敗，請稍後再試。')
-          return
-        }
+        } else {
+          const rosterData = rosterResult.value.data ?? []
+          const rosterError = rosterResult.value.error
 
-        const rosterData = rosterResult.value.data ?? []
-        const rosterError = rosterResult.value.error
-
-        if (rosterError) {
-          setRosterLoadError('載入學生名單失敗，請稍後再試。')
-          return
-        }
-
-        const rows: RosterRow[] = rosterData.map((item) => ({
-          student_id: String(item.student_id),
-          school_code: String(item.school_code),
-          class_name: String(item.class_name),
-          seat_no: String(item.seat_no),
-          masked_name: String(item.masked_name),
-          full_name: item.full_name ? String(item.full_name) : undefined,
-          active: item.active === undefined ? true : Boolean(item.active),
-        }))
-
-        setRosterRows(rows)
-
-// 👇👇👇 請把 console.log 加在這裡 👇👇👇
-        console.log('✅ 前端收到的學生總筆數：', rows.length)
-        
-        // 注意：請把下面的 '對應的學校代碼' 換成「臺南市南新國中」在資料庫裡的實際 school_code (例如 '114405')
-        console.log(
-          '🔍 南新國中的學生資料：', 
-          rows.filter(r => r.school_code === '對應的學校代碼') 
-        )
-        // 👆👆👆 加完這兩行 👆👆👆
-
-        if (schoolDirectoryResult.status === 'fulfilled' && !schoolDirectoryResult.value.error) {
-          const schoolRows: SchoolDirectoryRow[] = (schoolDirectoryResult.value.data ?? []).map(
-            (item) => ({
+          if (rosterError) {
+            setRosterRows([])
+            setRosterLoadError('載入學生名單失敗，請稍後再試。')
+          } else {
+            const rows: RosterRow[] = rosterData.map((item) => ({
+              student_id: String(item.student_id),
               school_code: String(item.school_code),
-              school_name: String(item.school_name),
-              county: String(item.county),
-              sort_order: Number(item.sort_order),
-              is_active: item.is_active === undefined ? true : Boolean(item.is_active),
-            })
-          )
+              class_name: String(item.class_name),
+              seat_no: String(item.seat_no),
+              masked_name: String(item.masked_name),
+              full_name: item.full_name ? String(item.full_name) : undefined,
+              active: item.active === undefined ? true : Boolean(item.active),
+            }))
+
+            setRosterRows(rows)
+          }
+        }
+
+        if (
+          schoolDirectoryResult.status === 'fulfilled' &&
+          !schoolDirectoryResult.value.error
+        ) {
+          const schoolRows: SchoolDirectoryRow[] = (
+            schoolDirectoryResult.value.data ?? []
+          ).map((item) => ({
+            school_code: String(item.school_code),
+            school_name: String(item.school_name),
+            county: String(item.county),
+            sort_order: Number(item.sort_order),
+            is_active:
+              item.is_active === undefined ? true : Boolean(item.is_active),
+          }))
+
           setSchoolDirectoryRows(schoolRows)
+          setSchoolLoadError('')
         } else {
           setSchoolDirectoryRows([])
+          setSchoolLoadError('載入學校資料失敗，已改用學生名單中的學校代碼作為備援。')
         }
       } catch (error) {
         console.error('loadData error:', error)
+        setRosterRows([])
+        setSchoolDirectoryRows([])
         setRosterLoadError('載入學生名單失敗，請稍後再試。')
+        setSchoolLoadError('載入學校資料失敗，請稍後再試。')
       } finally {
         setIsLoadingRoster(false)
       }
@@ -167,38 +189,38 @@ export default function EnterPage() {
     void loadData()
   }, [])
 
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        schoolDropdownRef.current &&
-        !schoolDropdownRef.current.contains(event.target as Node)
-      ) {
-        setSchoolDropdownOpen(false)
-      }
+  const schoolOptions = useMemo<SchoolOption[]>(() => {
+    if (schoolDirectoryRows.length > 0) {
+      return schoolDirectoryRows
+        .map((row) => ({
+          value: row.school_code,
+          label: row.school_name,
+          county: row.county,
+          sortOrder: row.sort_order,
+        }))
+        .sort((a, b) => {
+          if (a.sortOrder !== b.sortOrder) {
+            return a.sortOrder - b.sortOrder
+          }
+          return a.label.localeCompare(b.label, 'zh-Hant')
+        })
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [])
+    const fallbackCodes = numericAwareSort(
+      unique(
+        rosterRows
+          .map((row) => row.school_code)
+          .filter((value) => value.trim() !== '')
+      )
+    )
 
-  // 🔴 修改點 2：直接依賴 schoolDirectoryRows 生成所有啟用的學校選單
-  const schoolOptions = useMemo(() => {
-    return schoolDirectoryRows
-      .map((row) => ({
-        value: row.school_code,
-        label: row.school_name,
-        county: row.county,
-        sortOrder: row.sort_order,
-      }))
-      .sort((a, b) => {
-        if (a.sortOrder !== b.sortOrder) {
-          return a.sortOrder - b.sortOrder
-        }
-        return a.label.localeCompare(b.label, 'zh-Hant')
-      })
-  }, [schoolDirectoryRows])
+    return fallbackCodes.map((code, index) => ({
+      value: code,
+      label: code,
+      county: '',
+      sortOrder: index,
+    }))
+  }, [schoolDirectoryRows, rosterRows])
 
   const filteredSchoolOptions = useMemo(() => {
     const keyword = schoolKeyword.trim()
@@ -208,7 +230,7 @@ export default function EnterPage() {
       (option) =>
         option.label.includes(keyword) ||
         option.value.includes(keyword) ||
-        option.county.includes(keyword)
+        (option.county ?? '').includes(keyword)
     )
   }, [schoolOptions, schoolKeyword])
 
@@ -247,14 +269,20 @@ export default function EnterPage() {
   function resetLookupState() {
     setLookupError('')
     setMatchedStudent(null)
+    setEnterPassword('')
+  }
+
+  function handleModeChange(nextMode: EntryMode) {
+    setEntryMode(nextMode)
+    setLookupError('')
+    setMatchedStudent(null)
+    setEnterPassword('')
   }
 
   function handleSchoolChange(nextSchoolCode: string) {
     setSchoolCode(nextSchoolCode)
     setClassName('')
     setSeatNo('')
-    setSchoolDropdownOpen(false)
-    setSchoolKeyword('')
     resetLookupState()
   }
 
@@ -318,25 +346,26 @@ export default function EnterPage() {
     }
   }
 
-  async function handleEnterActivity() {
-    if (!matchedStudent) {
-      setLookupError('尚未確認學生資料，請先查詢姓名。')
-      return
-    }
-
+  async function createEntrySession(
+    base: LookupResult,
+    mode: EntryMode,
+    schoolDisplayName?: string
+  ) {
     setLookupError('')
     setIsEntering(true)
 
     try {
       const entrySession = {
-        studentId: matchedStudent.studentId,
-        schoolCode: matchedStudent.schoolCode,
-        schoolYear: matchedStudent.schoolYear,
-        semester: matchedStudent.semester,
-        grade: matchedStudent.grade,
-        className: matchedStudent.className,
-        seatNo: matchedStudent.seatNo,
-        maskedName: matchedStudent.maskedName,
+        studentId: base.studentId,
+        schoolCode: base.schoolCode,
+        schoolDisplayName: schoolDisplayName ?? '',
+        schoolYear: base.schoolYear,
+        semester: base.semester,
+        grade: base.grade,
+        className: base.className,
+        seatNo: base.seatNo,
+        maskedName: base.maskedName,
+        entryMode: mode,
         enteredAt: new Date().toISOString(),
       }
 
@@ -346,200 +375,391 @@ export default function EnterPage() {
       )
 
       const params = new URLSearchParams({
-        studentId: matchedStudent.studentId,
-        schoolCode: matchedStudent.schoolCode,
-        schoolYear: matchedStudent.schoolYear,
-        semester: matchedStudent.semester,
-        grade: matchedStudent.grade,
-        className: matchedStudent.className,
-        seatNo: matchedStudent.seatNo,
+        studentId: base.studentId,
+        schoolCode: base.schoolCode,
+        schoolYear: base.schoolYear,
+        semester: base.semester,
+        grade: base.grade,
+        className: base.className,
+        seatNo: base.seatNo,
+        entryMode: mode,
       })
 
       router.push(`${TARGET_PATH}?${params.toString()}`)
     } catch (error) {
-      console.error('handleEnterActivity error:', error)
+      console.error('createEntrySession error:', error)
       setLookupError('進入活動失敗，請稍後再試。')
       setIsEntering(false)
     }
   }
 
+  async function handleOfficialEnter() {
+    if (!matchedStudent) {
+      setLookupError('尚未確認學生資料，請先查詢姓名。')
+      return
+    }
+
+    if (enterPassword.trim() !== ROSTER_ENTRY_PASSWORD) {
+      setLookupError('進入密碼錯誤。')
+      return
+    }
+
+    await createEntrySession(matchedStudent, 'roster', selectedSchoolLabel)
+  }
+
+  async function handleTrialEnter() {
+    const school = manualSchoolName.trim()
+    const cls = manualClassName.trim()
+    const name = manualName.trim()
+    const seat = manualSeatNo.trim()
+
+    if (!school || !cls || !name) {
+      setLookupError('請至少填寫學校、班級與姓名。')
+      return
+    }
+
+    const manualEntry: LookupResult = {
+      studentId: `manual-${Date.now()}`,
+      schoolCode: `manual:${school}`,
+      schoolYear: FIXED_SCHOOL_YEAR,
+      semester: FIXED_SEMESTER,
+      grade: inferGradeFromClassName(cls),
+      className: cls,
+      seatNo: seat,
+      maskedName: name,
+    }
+
+    await createEntrySession(manualEntry, 'manual', school)
+  }
+
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8 md:px-6">
-      <div className="mx-auto max-w-xl rounded-2xl border border-gray-200 bg-white p-6">
-        <h1 className="mb-2 text-3xl font-black text-gray-900">進入活動</h1>
-        <p className="mb-6 text-sm leading-6 text-gray-600">
-          請依序選擇學校、班級與座號。下一步會根據正式名單顯示遮罩姓名供確認。
-        </p>
+    <main className="min-h-screen bg-[#f3f6f2] px-4 py-8 md:px-6">
+      <div className="mx-auto max-w-2xl rounded-[28px] border border-[#d8ddd8] bg-white p-6 shadow-sm md:p-8">
+        <div className="mb-8 text-center">
+          <a
+            href={LOGO_LINK}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full border border-[#d7ddd7] bg-[#f7faf7] shadow-sm transition hover:scale-[1.02]"
+          >
+            <img
+              src={LOGO_URL}
+              alt="Sci-Flipper Logo"
+              className="h-14 w-14 object-contain"
+            />
+          </a>
 
-        {rosterLoadError ? (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {rosterLoadError}
-          </div>
-        ) : null}
+          <h1 className="text-4xl font-black tracking-tight text-[#234a2c]">
+            Sci-Flipper 動物分類學習網站
+          </h1>
 
-        <div className="space-y-4">
-          <div ref={schoolDropdownRef} className="relative">
-            <label className="mb-1 block text-sm font-semibold text-gray-700">學校</label>
+          <p className="mt-3 text-base font-semibold text-[#4a5d4b]">
+            動物分類學習活動入口
+          </p>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (!isLoadingRoster && schoolOptions.length > 0) {
-                  setSchoolDropdownOpen((prev) => !prev)
-                }
-              }}
-              disabled={isLoadingRoster || schoolOptions.length === 0}
-              className="flex w-full items-center justify-between rounded-xl border border-gray-300 px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
-            >
-              <span className={schoolCode ? 'text-gray-900' : 'text-gray-500'}>
-                {isLoadingRoster
-                  ? SCHOOL_LOADING_TEXT
-                  : schoolCode
-                    ? selectedSchoolLabel
-                    : '請選擇學校'}
-              </span>
-              <span className="ml-3 text-gray-500">▾</span>
-            </button>
+          <p className="mt-2 text-sm leading-6 text-[#667266]">
+            正式參與請使用正式名單登入；課程體驗可自行填寫學校、班級與姓名後進入。
+          </p>
+        </div>
 
-            <div className="mt-1 text-xs text-gray-500">
-              {isLoadingRoster ? '載入中…' : `共 ${schoolOptions.length} 所學校`}
+        <div className="mb-6 grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => handleModeChange('roster')}
+            className={`rounded-xl px-4 py-3 text-sm font-bold transition ${
+              entryMode === 'roster'
+                ? 'bg-[#234a2c] text-white hover:bg-[#1b3a22]'
+                : 'border border-[#c8d2c8] bg-white text-[#234a2c]'
+            }`}
+          >
+            正式參與
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleModeChange('manual')}
+            className={`rounded-xl px-4 py-3 text-sm font-bold transition ${
+              entryMode === 'manual'
+                ? 'bg-[#234a2c] text-white hover:bg-[#1b3a22]'
+                : 'border border-[#c8d2c8] bg-white text-[#234a2c]'
+            }`}
+          >
+            課程體驗
+          </button>
+        </div>
+
+        {entryMode === 'roster' ? (
+          <>
+            <div className="mb-4 rounded-xl border border-[#e6d8a8] bg-[#fff8df] px-4 py-3 text-sm leading-6 text-[#8b6a1a]">
+              正式參與：請先選擇學校、班級、座號並確認姓名；進入第一階段前需再輸入密碼。
             </div>
 
-            {schoolDropdownOpen ? (
-              <div className="absolute z-30 mt-2 w-full rounded-2xl border border-gray-200 bg-white shadow-lg">
-                <div className="border-b border-gray-200 p-3">
+            {rosterLoadError ? (
+              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {rosterLoadError}
+              </div>
+            ) : null}
+
+            {schoolLoadError ? (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                {schoolLoadError}
+              </div>
+            ) : null}
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                  搜尋學校
+                </label>
+                <input
+                  value={schoolKeyword}
+                  onChange={(e) => setSchoolKeyword(e.target.value)}
+                  placeholder="可輸入校名、縣市或學校代碼"
+                  className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                  學校
+                </label>
+                <select
+                  value={schoolCode}
+                  onChange={(e) => handleSchoolChange(e.target.value)}
+                  disabled={isLoadingRoster || filteredSchoolOptions.length === 0}
+                  className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+                >
+                  <option value="">
+                    {isLoadingRoster
+                      ? '載入學校中…'
+                      : filteredSchoolOptions.length === 0
+                        ? '目前無可用學校資料'
+                        : '請選擇學校'}
+                  </option>
+
+                  {filteredSchoolOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.county
+                        ? `${option.label}（${option.county}）`
+                        : option.label}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="mt-1 text-xs text-[#708070]">
+                  {isLoadingRoster
+                    ? '載入中…'
+                    : `目前可選 ${filteredSchoolOptions.length} 所學校`}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                    班級
+                  </label>
+                  <select
+                    value={className}
+                    onChange={(e) => handleClassChange(e.target.value)}
+                    disabled={!schoolCode || classOptions.length === 0}
+                    className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+                  >
+                    <option value="">
+                      {!schoolCode
+                        ? '請先選學校'
+                        : classOptions.length === 0
+                          ? '此學校尚無學生資料'
+                          : '請選擇班級'}
+                    </option>
+
+                    {classOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                    座號
+                  </label>
+                  <select
+                    value={seatNo}
+                    onChange={(e) => handleSeatChange(e.target.value)}
+                    disabled={!className || seatOptions.length === 0}
+                    className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+                  >
+                    <option value="">
+                      {className ? '請選擇座號' : '請先選班級'}
+                    </option>
+
+                    {seatOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleLookup}
+                  disabled={
+                    isLookingUp || isEntering || !schoolCode || !className || !seatNo
+                  }
+                  className="rounded-xl bg-[#234a2c] px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isLookingUp ? '查詢中…' : '下一步：查詢姓名'}
+                </button>
+              </div>
+            </div>
+
+            {matchedStudent ? (
+              <div className="mt-6 rounded-xl border border-green-200 bg-green-50 p-4">
+                <div className="text-base font-bold text-[#1f3d23]">
+                  你是「{matchedStudent.maskedName}」嗎？
+                </div>
+
+                <div className="mt-2 text-sm leading-6 text-[#425142]">
+                  若正確，請輸入密碼後再進入第一階段。
+                </div>
+
+                <div className="mt-4">
+                  <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                    密碼
+                  </label>
                   <input
-                    value={schoolKeyword}
-                    onChange={(e) => setSchoolKeyword(e.target.value)}
-                    placeholder="輸入校名搜尋"
-                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+                    type="password"
+                    value={enterPassword}
+                    onChange={(e) => {
+                      setEnterPassword(e.target.value)
+                      setLookupError('')
+                    }}
+                    placeholder="請輸入密碼"
+                    className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
                   />
                 </div>
 
-                <div className="max-h-80 overflow-y-auto p-2">
-                  {filteredSchoolOptions.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-gray-500">
-                      找不到符合的學校
-                    </div>
-                  ) : (
-                    filteredSchoolOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => handleSchoolChange(option.value)}
-                        className={`block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-gray-100 ${
-                          schoolCode === option.value
-                            ? 'bg-gray-100 font-semibold text-gray-900'
-                            : 'text-gray-800'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))
-                  )}
+                <div className="mt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={handleOfficialEnter}
+                    disabled={isEntering}
+                    className="rounded-xl bg-[#234a2c] px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isEntering ? '進入中…' : '是，進入第一階段'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={resetLookupState}
+                    disabled={isEntering}
+                    className="rounded-xl border border-[#ccd5cc] px-4 py-3 text-sm font-bold text-[#425142] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    否，重新選擇
+                  </button>
                 </div>
               </div>
             ) : null}
-          </div>
+          </>
+        ) : null}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-  <label className="mb-1 block text-sm font-semibold text-gray-700">班級</label>
-  <select
-    value={className}
-    onChange={(e) => handleClassChange(e.target.value)}
-    disabled={!schoolCode || classOptions.length === 0}
-    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
-  >
-    {/* 根據狀況顯示不同的預設文字 */}
-    <option value="">
-      {!schoolCode 
-        ? '請先選學校' 
-        : classOptions.length === 0 
-          ? '此學校尚無學生資料' 
-          : '請選擇班級'}
-    </option>
-    
-    {classOptions.map((option) => (
-      <option key={option} value={option}>
-        {option}
-      </option>
-    ))}
-  </select>
-</div>
-
-            <div>
-              <label className="mb-1 block text-sm font-semibold text-gray-700">座號</label>
-              <select
-                value={seatNo}
-                onChange={(e) => handleSeatChange(e.target.value)}
-                disabled={!className || seatOptions.length === 0}
-                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
-              >
-                <option value="">{className ? '請選擇座號' : '請先選班級'}</option>
-                {seatOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+        {entryMode === 'manual' ? (
+          <>
+            <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900">
+              課程體驗：若不在正式名單中，可自行填寫學校、班級、姓名後進入。
             </div>
-          </div>
-        </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                  學校
+                </label>
+                <input
+                  value={manualSchoolName}
+                  onChange={(e) => {
+                    setManualSchoolName(e.target.value)
+                    setLookupError('')
+                  }}
+                  placeholder="例如：臺中市光榮國中"
+                  className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                    班級
+                  </label>
+                  <input
+                    value={manualClassName}
+                    onChange={(e) => {
+                      setManualClassName(e.target.value)
+                      setLookupError('')
+                    }}
+                    placeholder="例如：101"
+                    className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                    座號（可選）
+                  </label>
+                  <input
+                    value={manualSeatNo}
+                    onChange={(e) => {
+                      setManualSeatNo(e.target.value)
+                      setLookupError('')
+                    }}
+                    placeholder="例如：12"
+                    className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-[#425142]">
+                  姓名
+                </label>
+                <input
+                  value={manualName}
+                  onChange={(e) => {
+                    setManualName(e.target.value)
+                    setLookupError('')
+                  }}
+                  placeholder="請輸入姓名"
+                  className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleTrialEnter}
+                  disabled={
+                    isEntering ||
+                    !manualSchoolName.trim() ||
+                    !manualClassName.trim() ||
+                    !manualName.trim()
+                  }
+                  className="rounded-xl bg-[#234a2c] px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isEntering ? '進入中…' : '直接進入第一階段'}
+                </button>
+              </div>
+            </div>
+          </>
+        ) : null}
 
         {lookupError ? (
           <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {lookupError}
           </div>
         ) : null}
-
-        {matchedStudent ? (
-          <div className="mt-6 rounded-xl border border-green-200 bg-green-50 p-4">
-            <div className="text-base font-bold text-gray-900">
-              你是「{matchedStudent.maskedName}」嗎？
-            </div>
-            <div className="mt-2 text-sm leading-6 text-gray-700">
-              若正確，下一步可進入學習頁面。
-            </div>
-
-            <div className="mt-4 flex gap-3">
-              <button
-                type="button"
-                onClick={handleEnterActivity}
-                disabled={isEntering}
-                className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isEntering ? '進入中…' : '是，進入活動'}
-              </button>
-
-              <button
-                type="button"
-                onClick={resetLookupState}
-                disabled={isEntering}
-                className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold text-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                否，重新選擇
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="mt-6 flex justify-end">
-          <button
-            type="button"
-            onClick={handleLookup}
-            disabled={
-              isLookingUp ||
-              isEntering ||
-              !schoolCode ||
-              !className ||
-              !seatNo
-            }
-            className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isLookingUp ? '查詢中…' : '下一步：查詢姓名'}
-          </button>
-        </div>
       </div>
     </main>
   )
