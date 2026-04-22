@@ -87,6 +87,12 @@ const INITIAL_GROUPS: StageGroup[] = [
   { id: 'G3', name: '群組 3', reason: '', cardIds: [] },
 ]
 
+const STAGE1_OVERALL_REASON_MIN_LENGTH = 8
+
+function getTrimmedLength(value: string) {
+  return String(value ?? '').trim().length
+}
+
 const STAGE_ITEMS: { key: AppStage; label: string }[] = [
   { key: 'stage1', label: '自由預分類' },
   { key: 'awareness', label: '六門規則建立' },
@@ -586,6 +592,7 @@ export default function Page() {
   const awarenessBaseSecondsRef = useRef(0)
   const lastSubmittedHashRef = useRef('')
   const retryTimerRef = useRef<number | null>(null)
+  const evidenceTopRef = useRef<HTMLDivElement | null>(null)
 
   const readinessOptionMap = useMemo(() => {
     const map: Record<string, string[]> = {}
@@ -729,6 +736,21 @@ export default function Page() {
     }
   }, [stage])
 
+  useEffect(() => {
+    if (stage !== 'evidence') return
+
+    const timer = window.setTimeout(() => {
+      evidenceTopRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [stage, evidenceIndex])
+
   const nonEmptyGroups = useMemo(
     () => groups.filter((group) => group.cardIds.length > 0),
     [groups]
@@ -739,18 +761,49 @@ export default function Page() {
     [nonEmptyGroups]
   )
 
+  const overallReasonLength = getTrimmedLength(overallReason)
+  const overallReasonRemaining = Math.max(
+    0,
+    STAGE1_OVERALL_REASON_MIN_LENGTH - overallReasonLength
+  )
+
+  const stage1IncompleteMessages = useMemo(() => {
+    const messages: string[] = []
+
+    if (bankCardIds.length > 0) {
+      messages.push('還有卡片尚未分組。')
+    }
+
+    if (nonEmptyGroups.length < 2) {
+      messages.push('至少需要 2 個非空群組。')
+    }
+
+    if (nonEmptyGroups.some((group) => group.reason.trim().length === 0)) {
+      messages.push('每個非空群組都要填寫分類理由。')
+    }
+
+    if (overallReasonLength < STAGE1_OVERALL_REASON_MIN_LENGTH) {
+      messages.push(
+        `整體分類想法至少需要 ${STAGE1_OVERALL_REASON_MIN_LENGTH} 字，目前為 ${overallReasonLength} 字。`
+      )
+    }
+
+    return messages
+  }, [bankCardIds.length, nonEmptyGroups, overallReasonLength])
+
   const stage1Complete =
     bankCardIds.length === 0 &&
     groupedCardCount === stage1Cards.length &&
     nonEmptyGroups.length >= 2 &&
     nonEmptyGroups.every((group) => group.reason.trim().length > 0) &&
-    overallReason.trim().length >= 8
+    overallReasonLength >= STAGE1_OVERALL_REASON_MIN_LENGTH
 
   const reflectionComplete = bridgeReflectQuestions.every(
     (question) => (bridgeReflectAnswers[question.id] ?? []).length > 0
   )
 
   const featureChoiceComplete = diagnosticFeatures.length + possibleFeatures.length > 0
+  const awarenessABComplete = reflectionComplete && featureChoiceComplete
 
   const readinessComplete = READINESS_CHECKS.every(
     (item) => readinessAnswers[item.id] === item.correct
@@ -951,18 +1004,18 @@ export default function Page() {
   function saveCurrentEvidence(): EvidenceResponse[] | null {
     if (!currentEvidence) return null
 
-    if (!evidenceAnswer) {
-      window.alert('請先選擇一個門別。')
-      return null
-    }
-
     if (evidenceSelectedFeatures.length === 0) {
-      window.alert('請至少勾選一個判斷特徵。')
+      window.alert('請先至少勾選一個判斷特徵。')
       return null
     }
 
     if (evidenceReasonText.trim().length < 8) {
       window.alert('請至少寫 8 個字，簡短說明判斷理由。')
+      return null
+    }
+
+    if (!evidenceAnswer) {
+      window.alert('請再選擇一個門別。')
       return null
     }
 
@@ -1104,7 +1157,7 @@ export default function Page() {
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
               <h1 className="text-2xl font-black tracking-tight text-gray-900 sm:text-3xl">
-                Sci-Flipper 動物分類學習網站
+                Sci-Flipper 動物分類自主學習網站
               </h1>
               <div className="mt-1 text-sm leading-6 text-gray-600">
                 目前學生：
@@ -1380,18 +1433,57 @@ export default function Page() {
                         placeholder="請說明為什麼分在一起"
                         className="min-h-[56px] w-full rounded-xl border border-gray-300 px-3 py-2 text-sm leading-6 text-gray-900 placeholder:text-gray-400"
                       />
+
+                      <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+                        <span className="text-gray-500">這一組只要有放入生物卡，就必須填寫理由。</span>
+                        <span className={group.reason.trim().length > 0 ? 'text-green-700' : 'text-amber-700'}>
+                          目前 {group.reason.trim().length} 字
+                        </span>
+                      </div>
+
+                      {group.cardIds.length > 0 && group.reason.trim().length === 0 ? (
+                        <div className="mt-1 text-xs font-semibold text-amber-700">
+                          這一組已有生物卡，請補上分類理由。
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>
 
                 <div className="mt-4">
-                  <div className="mb-2 text-sm font-semibold text-gray-700">整體分類想法</div>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-gray-700">整體分類想法</div>
+                    <div
+                      className={`text-xs font-semibold ${
+                        overallReasonLength >= STAGE1_OVERALL_REASON_MIN_LENGTH
+                          ? 'text-green-700'
+                          : 'text-amber-700'
+                      }`}
+                    >
+                      {overallReasonLength} / {STAGE1_OVERALL_REASON_MIN_LENGTH} 字
+                    </div>
+                  </div>
+
                   <textarea
                     value={overallReason}
                     onChange={(e) => setOverallReason(e.target.value)}
                     placeholder="請用一句話說明你這次分類的主要思路"
                     className="min-h-[88px] w-full rounded-xl border border-gray-300 px-3 py-3 text-sm leading-6 text-gray-900"
                   />
+
+                  <div className="mt-2 text-xs leading-6">
+                    <div className="text-gray-500">
+                      至少需要 {STAGE1_OVERALL_REASON_MIN_LENGTH} 字，請說明你主要是根據哪些特徵來分類。
+                    </div>
+
+                    {overallReasonLength >= STAGE1_OVERALL_REASON_MIN_LENGTH ? (
+                      <div className="font-semibold text-green-700">已達進入下一階段的字數門檻。</div>
+                    ) : (
+                      <div className="font-semibold text-amber-700">
+                        尚未達門檻，還差 {overallReasonRemaining} 字。
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mt-4 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
@@ -1405,8 +1497,26 @@ export default function Page() {
                         : '尚未完成'}
                       ：每個非空群組都有理由
                     </li>
-                    <li>{overallReason.trim().length >= 8 ? '已完成' : '尚未完成'}：已寫整體分類想法</li>
+                    <li>
+                      {overallReasonLength >= STAGE1_OVERALL_REASON_MIN_LENGTH ? '已完成' : '尚未完成'}
+                      ：已寫整體分類想法（至少 {STAGE1_OVERALL_REASON_MIN_LENGTH} 字）
+                    </li>
                   </ul>
+
+                  {!stage1Complete ? (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900">
+                      <div className="font-semibold">目前尚不能進入階段 2，原因如下：</div>
+                      <ul className="mt-1 list-disc pl-5">
+                        {stage1IncompleteMessages.map((message) => (
+                          <li key={message}>{message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm leading-6 text-green-800">
+                      已符合進入階段 2 的條件。
+                    </div>
+                  )}
 
                   <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:justify-end">
                     <button
@@ -1489,10 +1599,16 @@ export default function Page() {
               </div>
 
               <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <h3 className="mb-4 text-2xl font-black">任務 B：區分較穩定與較不穩定的線索</h3>
+                <h3 className="mb-4 text-2xl font-black">任務 B：區分關鍵與輔助類型的線索</h3>
+
+                <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+                  請把你認為較有分門判斷力的線索放到第一區；若只是可能有幫助、但不足以單獨判定門別，放到第二區。
+                </div>
 
                 <div className="rounded-xl border border-gray-200 p-4">
-                  <div className="mb-3 text-lg font-bold text-gray-900">勾選：較適合幫助分門的線索</div>
+                  <div className="mb-3 text-lg font-bold text-gray-900">
+                    勾選：較能幫助分門的關鍵線索（較有決定性）
+                  </div>
                   <ToggleCheckboxGrid
                     options={FEATURE_BANK}
                     selected={diagnosticFeatures}
@@ -1502,7 +1618,7 @@ export default function Page() {
 
                 <div className="mt-4 rounded-xl border border-gray-200 p-4">
                   <div className="mb-3 text-lg font-bold text-gray-900">
-                    勾選：可能有幫助，但不能單獨決定的線索
+                    勾選：可能有幫助，但不能成為分門關鍵的輔助線索
                   </div>
                   <ToggleCheckboxGrid
                     options={FEATURE_BANK}
@@ -1522,90 +1638,107 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <h3 className="mb-4 text-2xl font-black">任務 C：六門提示卡</h3>
-                <div className="mb-4 text-sm leading-6 text-gray-700">
-                  這裡明確整理六個門的關鍵特徵與代表生物。第三階段可以繼續參考，不要求死背。
-                </div>
+              {awarenessABComplete ? (
+                <>
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                    <h3 className="mb-4 text-2xl font-black">任務 C：六門提示卡</h3>
+                    <div className="mb-4 text-sm leading-6 text-gray-700">
+                      你已完成前面的回顧與線索分類，現在可以參考六個門的關鍵特徵與代表生物。第三階段可繼續參考，不要求死背。
+                    </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
-                  {PHYLUM_GUIDE.map((guide) => (
-                    <GuideCardView key={guide.phylum} guide={guide} />
-                  ))}
-                </div>
-              </div>
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      {PHYLUM_GUIDE.map((guide) => (
+                        <GuideCardView key={guide.phylum} guide={guide} />
+                      ))}
+                    </div>
+                  </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <h3 className="mb-4 text-2xl font-black">任務 D：就緒檢核</h3>
-                <div className="mb-4 text-sm text-gray-600">
-                  選項順序已隨機化。若答錯，請回看提示卡再重作。系統會記錄重試次數，但不直接顯示正確答案位置。
-                </div>
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                    <h3 className="mb-4 text-2xl font-black">任務 D：就緒檢核</h3>
+                    <div className="mb-4 text-sm text-gray-600">
+                      選項順序已隨機化。若答錯，請回看提示卡再重作。系統會記錄重試次數，但不直接顯示正確答案位置。
+                    </div>
 
-                <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700">
-                  目前學習時間：{awarenessSecondsSpent} 秒　
-                  {minStudyTimeMet ? '（已達最短學習時間）' : `（至少需 45 秒，尚差 ${45 - awarenessSecondsSpent} 秒）`}
-                </div>
+                    <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700">
+                      目前學習時間：{awarenessSecondsSpent} 秒　
+                      {minStudyTimeMet
+                        ? '（已達最短學習時間）'
+                        : `（至少需 45 秒，尚差 ${45 - awarenessSecondsSpent} 秒）`}
+                    </div>
 
-                <div className="space-y-4">
-                  {READINESS_CHECKS.map((item) => {
-                    const currentValue = readinessAnswers[item.id] ?? ''
-                    const isCorrect = currentValue && currentValue === item.correct
-                    const isWrong = currentValue && currentValue !== item.correct
+                    <div className="space-y-4">
+                      {READINESS_CHECKS.map((item) => {
+                        const currentValue = readinessAnswers[item.id] ?? ''
+                        const isCorrect = currentValue && currentValue === item.correct
+                        const isWrong = currentValue && currentValue !== item.correct
 
-                    return (
-                      <div key={item.id} className="rounded-xl border border-gray-200 p-4">
-                        <div className="mb-3 font-bold">{item.question}</div>
+                        return (
+                          <div key={item.id} className="rounded-xl border border-gray-200 p-4">
+                            <div className="mb-3 font-bold">{item.question}</div>
 
-                        <div className="grid gap-2 md:grid-cols-3">
-                          {readinessOptionMap[item.id].map((option) => (
-                            <label
-                              key={option}
-                              className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm"
-                            >
-                              <input
-                                type="radio"
-                                name={item.id}
-                                checked={currentValue === option}
-                                onChange={() => handleReadinessAnswer(item.id, option)}
-                                className="mt-1"
-                              />
-                              <span>{option}</span>
-                            </label>
-                          ))}
-                        </div>
+                            <div className="grid gap-2 md:grid-cols-3">
+                              {readinessOptionMap[item.id].map((option) => (
+                                <label
+                                  key={option}
+                                  className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm"
+                                >
+                                  <input
+                                    type="radio"
+                                    name={item.id}
+                                    checked={currentValue === option}
+                                    onChange={() => handleReadinessAnswer(item.id, option)}
+                                    className="mt-1"
+                                  />
+                                  <span>{option}</span>
+                                </label>
+                              ))}
+                            </div>
 
-                        {isCorrect ? (
-                          <div className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-                            正確。
+                            {isCorrect ? (
+                              <div className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                                正確。
+                              </div>
+                            ) : null}
+
+                            {isWrong ? (
+                              <div className="mt-3 rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+                                這題還需要修正。先回看上面的提示卡，再重選一次。
+                              </div>
+                            ) : null}
+
+                            <div className="mt-2 text-xs text-gray-500">
+                              本題已作答 {readinessAttemptCounts[item.id] ?? 0} 次
+                            </div>
                           </div>
-                        ) : null}
+                        )
+                      })}
+                    </div>
 
-                        {isWrong ? (
-                          <div className="mt-3 rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
-                            這題還需要修正。先回看上面的提示卡，再重選一次。
-                          </div>
-                        ) : null}
-
-                        <div className="mt-2 text-xs text-gray-500">
-                          本題已作答 {readinessAttemptCounts[item.id] ?? 0} 次
-                        </div>
-                      </div>
-                    )
-                  })}
+                    <label className="mt-5 flex items-start gap-2 rounded-xl border border-gray-200 p-3 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={awarenessCommitment}
+                        onChange={(e) => setAwarenessCommitment(e.target.checked)}
+                        className="mt-1"
+                      />
+                      <span>
+                        我知道第三階段可以參考提示卡，不需要硬背六個門；重點是學會用特徵判斷。
+                      </span>
+                    </label>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
+                  <h3 className="mb-2 text-xl font-black text-amber-900">任務 C、D 將在完成任務 A、B 後開啟</h3>
+                  <div className="text-sm leading-6 text-amber-900">
+                    請先完成前兩項任務，以免後面的提示與檢核干擾你的作答。
+                  </div>
+                  <ul className="mt-3 list-disc pl-5 text-sm leading-6 text-amber-900">
+                    <li>{reflectionComplete ? '任務 A 已完成' : '任務 A 尚未完成'}</li>
+                    <li>{featureChoiceComplete ? '任務 B 已完成' : '任務 B 尚未完成'}</li>
+                  </ul>
                 </div>
-
-                <label className="mt-5 flex items-start gap-2 rounded-xl border border-gray-200 p-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={awarenessCommitment}
-                    onChange={(e) => setAwarenessCommitment(e.target.checked)}
-                    className="mt-1"
-                  />
-                  <span>
-                    我知道第三階段可以參考提示卡，不需要硬背六個門；重點是學會用特徵判斷。
-                  </span>
-                </label>
-              </div>
+              )}
 
               <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
                 <button
@@ -1633,6 +1766,8 @@ export default function Page() {
           {stage === 'evidence' && currentEvidence && (
             <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
               <div className="space-y-4">
+                <div ref={evidenceTopRef} />
+
                 <SummaryBlock title="前面兩階段摘要">
                   <div className="space-y-2">
                     <div>已形成 {nonEmptyGroups.length} 個非空群組。</div>
@@ -1650,7 +1785,27 @@ export default function Page() {
                 />
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                  <div className="mb-3 text-lg font-black">請選擇門別</div>
+                  <div className="mb-3 text-lg font-black">先勾選你判斷時最主要依據的特徵（可複選）</div>
+                  <div className="mb-2 text-sm text-gray-600">
+                    先想你看到了哪些特徵，再根據特徵推論門別。
+                  </div>
+                  <FeatureCheckboxes
+                    selected={evidenceSelectedFeatures}
+                    onChange={setEvidenceSelectedFeatures}
+                  />
+
+                  <div className="mb-2 mt-5 text-lg font-black">再簡短說明理由</div>
+                  <div className="mb-2 text-sm text-gray-600">
+                    可用句型：「我觀察到＿＿特徵，所以我推測它可能屬於＿＿。」
+                  </div>
+                  <textarea
+                    value={evidenceReasonText}
+                    onChange={(e) => setEvidenceReasonText(e.target.value)}
+                    className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
+                    placeholder="請至少寫 8 個字，簡短說明你是根據哪些特徵做判斷"
+                  />
+
+                  <div className="mb-3 mt-5 text-lg font-black">接著選擇你判定的門別</div>
                   <div className="grid gap-2 md:grid-cols-2">
                     {SIX_PHYLA.map((option) => (
                       <label
@@ -1668,26 +1823,7 @@ export default function Page() {
                     ))}
                   </div>
 
-                  <div className="mb-3 mt-5 text-lg font-black">
-                    你這一題最主要依據哪些特徵？（可複選）
-                  </div>
-                  <FeatureCheckboxes
-                    selected={evidenceSelectedFeatures}
-                    onChange={setEvidenceSelectedFeatures}
-                  />
-
-                  <div className="mb-2 mt-5 text-lg font-black">簡短說明理由</div>
-                  <div className="mb-2 text-sm text-gray-600">
-                    可用句型：「我判斷它屬於＿＿，因為我觀察到＿＿特徵，所以我排除／判定＿＿。」
-                  </div>
-                  <textarea
-                    value={evidenceReasonText}
-                    onChange={(e) => setEvidenceReasonText(e.target.value)}
-                    className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
-                    placeholder="請至少寫 8 個字，簡短說明你為什麼這樣判斷"
-                  />
-
-                  <div className="mb-2 mt-5 text-lg font-black">信心程度</div>
+                  <div className="mb-2 mt-5 text-lg font-black">最後評估你的信心程度</div>
                   <input
                     type="range"
                     min={1}
@@ -1796,7 +1932,9 @@ export default function Page() {
                   <div>
                     正確題數：{correctCount} / {evidenceQuestions.length}
                   </div>
-                  <div className="mt-2">已完成門別判定：{evidenceResponses.length} / {evidenceQuestions.length}</div>
+                  <div className="mt-2">
+                    已完成門別判定：{evidenceResponses.length} / {evidenceQuestions.length}
+                  </div>
                 </SummaryBlock>
 
                 <SummaryBlock title="下一步建議">
@@ -1834,7 +1972,9 @@ export default function Page() {
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-700">
                           <div>你的答案：{row.userAnswer || '未作答'}</div>
-                          <div>你的依據：{row.selectedFeatures.length ? row.selectedFeatures.join('、') : '未勾選'}</div>
+                          <div>
+                            你的依據：{row.selectedFeatures.length ? row.selectedFeatures.join('、') : '未勾選'}
+                          </div>
                         </div>
 
                         <div className="rounded-lg bg-blue-50 p-3 text-sm leading-6 text-gray-700">
