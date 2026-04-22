@@ -454,7 +454,7 @@ export default function EnterPage() {
           </h1>
 
           <p className="mt-3 text-base font-semibold text-[#4a5d4b]">
-            動物分類學習活動入口
+            動物分類自主學習網站入口
           </p>
 
           <p className="mt-2 text-sm leading-6 text-[#667266]">

@@ -1,6 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import {
   stage1Cards,
   bridgeReflectQuestions,
@@ -498,11 +505,7 @@ function QuestionCard({
       </div>
       {imageUrl ? (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-3">
-          <img
-            src={imageUrl}
-            alt={prompt}
-            className="h-48 w-full object-contain sm:h-56"
-          />
+          <img src={imageUrl} alt={prompt} className="h-48 w-full object-contain sm:h-56" />
         </div>
       ) : null}
     </div>
@@ -591,7 +594,9 @@ export default function Page() {
   const awarenessStartedAtRef = useRef<number | null>(null)
   const awarenessBaseSecondsRef = useRef(0)
   const lastSubmittedHashRef = useRef('')
+  const lastProgressSubmittedHashRef = useRef('')
   const retryTimerRef = useRef<number | null>(null)
+  const progressSaveTimerRef = useRef<number | null>(null)
   const evidenceTopRef = useRef<HTMLDivElement | null>(null)
 
   const readinessOptionMap = useMemo(() => {
@@ -634,6 +639,7 @@ export default function Page() {
 
   useEffect(() => {
     if (!participantCode || participantCode === 'anonymous' || progressHydrated) return
+
     try {
       const raw = localStorage.getItem(`animal-classifier-progress:${participantCode}`)
       if (!raw) {
@@ -751,10 +757,7 @@ export default function Page() {
     }
   }, [stage, evidenceIndex])
 
-  const nonEmptyGroups = useMemo(
-    () => groups.filter((group) => group.cardIds.length > 0),
-    [groups]
-  )
+  const nonEmptyGroups = useMemo(() => groups.filter((group) => group.cardIds.length > 0), [groups])
 
   const groupedCardCount = useMemo(
     () => nonEmptyGroups.reduce((sum, group) => sum + group.cardIds.length, 0),
@@ -905,6 +908,7 @@ export default function Page() {
       setDiagnosticFeatures((prev) => prev.filter((item) => item !== feature))
       return
     }
+
     setDiagnosticFeatures((prev) => [...prev, feature])
     setPossibleFeatures((prev) => prev.filter((item) => item !== feature))
   }
@@ -914,6 +918,7 @@ export default function Page() {
       setPossibleFeatures((prev) => prev.filter((item) => item !== feature))
       return
     }
+
     setPossibleFeatures((prev) => [...prev, feature])
     setDiagnosticFeatures((prev) => prev.filter((item) => item !== feature))
   }
@@ -1040,7 +1045,7 @@ export default function Page() {
     () => ({
       participantCode,
       participant: enterSession,
-      version: 'v6-responsive-touch-friendly',
+      version: 'v6-responsive-touch-friendly-with-progress-snapshot',
       stage1: {
         groups,
         bankCardIds,
@@ -1066,7 +1071,6 @@ export default function Page() {
         totalQuestions: evidenceQuestions.length,
       },
       resultRows,
-      autoSubmitState,
     }),
     [
       participantCode,
@@ -1089,40 +1093,91 @@ export default function Page() {
       evidenceResponses,
       correctCount,
       resultRows,
-      autoSubmitState,
     ]
   )
 
   const exportHash = useMemo(() => JSON.stringify(exportPayload), [exportPayload])
 
+  const submitStudentData = useCallback(
+    async (mode: 'progress' | 'final') => {
+      if (!submissionKey || !enterSession) return false
+
+      const response = await fetch('/api/student-submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          submissionKey,
+          participantCode,
+          participant: enterSession,
+          payload: exportPayload,
+          saveMode: mode,
+          currentStage: stage,
+          isCompleted: mode === 'final',
+          savedAt: new Date().toISOString(),
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result?.error || '送出失敗')
+      }
+
+      return true
+    },
+    [submissionKey, participantCode, enterSession, exportPayload, stage]
+  )
+
+  useEffect(() => {
+    if (!submissionKey || !enterSession || !progressHydrated) return
+    if (participantCode === 'anonymous') return
+    if (stage === 'done') return
+    if (exportHash === lastProgressSubmittedHashRef.current) return
+
+    if (progressSaveTimerRef.current) {
+      window.clearTimeout(progressSaveTimerRef.current)
+    }
+
+    progressSaveTimerRef.current = window.setTimeout(async () => {
+      try {
+        await submitStudentData('progress')
+        lastProgressSubmittedHashRef.current = exportHash
+      } catch (error) {
+        console.error('progress snapshot 儲存失敗:', error)
+      }
+    }, 2000)
+
+    return () => {
+      if (progressSaveTimerRef.current) {
+        window.clearTimeout(progressSaveTimerRef.current)
+      }
+    }
+  }, [
+    submissionKey,
+    enterSession,
+    participantCode,
+    progressHydrated,
+    stage,
+    exportHash,
+    submitStudentData,
+  ])
+
   useEffect(() => {
     if (stage !== 'done' || !submissionKey || !enterSession) return
     if (exportHash === lastSubmittedHashRef.current) return
+
+    if (progressSaveTimerRef.current) {
+      window.clearTimeout(progressSaveTimerRef.current)
+    }
 
     const submit = async () => {
       setAutoSubmitState('saving')
       setAutoSubmitMessage('系統正在自動儲存並送出結果…')
 
       try {
-        const response = await fetch('/api/student-submit', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            submissionKey,
-            participantCode,
-            participant: enterSession,
-            payload: exportPayload,
-          }),
-        })
-
-        const result = await response.json()
-
-        if (!response.ok) {
-          throw new Error(result?.error || '送出失敗')
-        }
-
+        await submitStudentData('final')
         lastSubmittedHashRef.current = exportHash
         setAutoSubmitState('saved')
         setAutoSubmitMessage('已完成，資料已自動儲存並送出。')
@@ -1148,7 +1203,7 @@ export default function Page() {
         window.clearTimeout(retryTimerRef.current)
       }
     }
-  }, [stage, submissionKey, participantCode, enterSession, exportPayload, exportHash])
+  }, [stage, submissionKey, enterSession, exportHash, submitStudentData])
 
   return (
     <main className="min-h-screen bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 md:px-6">
@@ -1173,7 +1228,7 @@ export default function Page() {
 
         <div className="flex-1">
           {stage === 'stage1' && (
-            <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+            <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
               <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
@@ -1286,7 +1341,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="min-h-0 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm lg:h-[calc(100vh-180px)] lg:overflow-y-auto lg:pr-1">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h2 className="text-2xl font-black text-gray-900">你的群組</h2>
                   <button
@@ -1832,9 +1887,7 @@ export default function Page() {
                     onChange={(e) => setEvidenceConfidence(Number(e.target.value))}
                     className="w-full"
                   />
-                  <div className="mt-1 text-sm text-gray-600">
-                    目前信心：{evidenceConfidence} / 4
-                  </div>
+                  <div className="mt-1 text-sm text-gray-600">目前信心：{evidenceConfidence} / 4</div>
 
                   <div className="mt-5 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
                     目前已完成 {evidenceResponses.length} / {evidenceQuestions.length} 題。右側提示卡可隨時參考。
