@@ -160,21 +160,21 @@ const PHYLUM_GUIDE: GuideCard[] = [
     phylum: '扁形動物門',
     examples: ['渦蟲'],
     keyFeatures: ['身體扁平', '左右對稱', '無體節'],
-    unstableClues: ['身體細長', '生活在水中'],
+    unstableClues: ['皆為寄生蟲', '生活在水中'],
     teacherTip: '重點是扁平且無體節，不是只看細長。',
   },
   {
     phylum: '軟體動物門',
     examples: ['蛤蠣', '蝸牛'],
     keyFeatures: ['外套膜', '肌肉足', '多數有殼'],
-    unstableClues: ['只要有殼就一定是', '看起來很軟'],
+    unstableClues: ['外表有殼', '看起來很軟'],
     teacherTip: '殼常見，但不是唯一依據；要注意外套膜與肌肉足。',
   },
   {
     phylum: '環節動物門',
     examples: ['蚯蚓', '水蛭'],
     keyFeatures: ['身體分節', '環狀體節'],
-    unstableClues: ['身體長條', '生活在泥土或水裡'],
+    unstableClues: ['身體細長', '生活在泥土或水裡'],
     teacherTip: '最關鍵的是體節，不是只看長條外形。',
   },
   {
@@ -188,7 +188,7 @@ const PHYLUM_GUIDE: GuideCard[] = [
     phylum: '棘皮動物門',
     examples: ['海膽', '海星'],
     keyFeatures: ['棘皮', '管足', '成體多為五輻對稱'],
-    unstableClues: ['一定是星形', '表面粗糙就算'],
+    unstableClues: ['固著不動', '有外骨骼'],
     teacherTip: '重點不是像星星，而是棘皮、管足與五輻對稱。',
   },
 ]
@@ -1532,7 +1532,7 @@ export default function Page() {
       )
     )
     setDiagnosticFeatures(['刺絲胞', '身體分節', '外骨骼'])
-    setPossibleFeatures(['會飛', '一定是星形'])
+    setPossibleFeatures(['會飛', '星形'])
     setCustomFeatureText('')
     setReadinessAnswers(allCorrectReadinessAnswers)
     setReadinessAttemptCounts(allReadinessCounts)
@@ -1572,7 +1572,7 @@ export default function Page() {
       )
     )
     setDiagnosticFeatures(['刺絲胞', '身體分節', '外骨骼'])
-    setPossibleFeatures(['會飛', '一定是星形'])
+    setPossibleFeatures(['會飛', '星形'])
     setCustomFeatureText('')
     setReadinessAnswers(allCorrectReadinessAnswers)
     setReadinessAttemptCounts(allReadinessCounts)
@@ -1613,7 +1613,7 @@ export default function Page() {
       )
     )
     setDiagnosticFeatures(['刺絲胞', '身體分節', '外骨骼'])
-    setPossibleFeatures(['會飛', '一定是星形'])
+    setPossibleFeatures(['會飛', '星形'])
     setCustomFeatureText('')
     setReadinessAnswers(allCorrectReadinessAnswers)
     setReadinessAttemptCounts(allReadinessCounts)
