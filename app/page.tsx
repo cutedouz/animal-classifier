@@ -14,7 +14,7 @@ import {
   evidenceQuestions,
 } from '../lib/questions'
 
-type AppStage = 'stage1' | 'awareness' | 'evidence' | 'done'
+type AppStage = 'stage1' | 'awareness' | 'evidence' | 'transfer' | 'done'
 
 const SIX_PHYLA = [
   '刺絲胞動物門',
@@ -88,6 +88,14 @@ type ResultRow = {
   feedback: string
 }
 
+type QuestionLike = {
+  id: string
+  prompt: string
+  stimulusText: string
+  imageUrl: string | null
+  animalName?: string
+}
+
 const INITIAL_GROUPS: StageGroup[] = [
   { id: 'G1', name: '群組 1', reason: '', cardIds: [] },
   { id: 'G2', name: '群組 2', reason: '', cardIds: [] },
@@ -96,15 +104,48 @@ const INITIAL_GROUPS: StageGroup[] = [
 
 const STAGE1_OVERALL_REASON_MIN_LENGTH = 8
 
+const STAGE3_EVIDENCE_IDS = ['Q1', 'Q3', 'Q4', 'Q6', 'Q9', 'Q10'] as const
+
 function getTrimmedLength(value: string) {
   return String(value ?? '').trim().length
 }
 
-const STAGE_ITEMS: { key: AppStage; label: string }[] = [
-  { key: 'stage1', label: '自由預分類' },
-  { key: 'awareness', label: '六門規則建立' },
-  { key: 'evidence', label: '帶提示門別判定' },
-  { key: 'done', label: '結果回饋' },
+const STAGE_ITEMS: {
+  key: AppStage
+  studentLabel: string
+  teacherLabel: string
+  fiveELabel: string
+}[] = [
+  {
+    key: 'stage1',
+    studentLabel: '自由分類',
+    teacherLabel: '先備概念外顯',
+    fiveELabel: '5E: Engage',
+  },
+  {
+    key: 'awareness',
+    studentLabel: '判準建立',
+    teacherLabel: '分類規則建立',
+    fiveELabel: '5E: Explore → Explain',
+  },
+  {
+    key: 'evidence',
+    studentLabel: '帶提示判定',
+    teacherLabel: '鷹架化判定',
+    fiveELabel: '5E: Elaborate (Scaffolded)',
+  },
+  {
+    key: 'transfer',
+    studentLabel: '遷移應用',
+    teacherLabel: '學習遷移評量',
+    fiveELabel: '5E: Elaborate (Transfer)',
+  },
+  {
+    key: 'done',
+    studentLabel: '結果回饋',
+    teacherLabel: '形成性回饋與歷程分析',
+    fiveELabel: '5E: Evaluate',
+  },
 ]
 
 const PHYLUM_GUIDE: GuideCard[] = [
@@ -221,6 +262,57 @@ const READINESS_CHECKS: ReadinessCheck[] = [
   },
 ]
 
+const transferQuestions: QuestionLike[] = [
+  {
+    id: 'T1',
+    animalName: '珊瑚',
+    prompt: '珊瑚應該分類到哪一門？',
+    stimulusText:
+      '已知：具有刺絲胞，常呈輻射對稱。請依主要構造判斷。',
+    imageUrl: '/animals/transfer/Goniopora%20lobata.jpg',
+  },
+  {
+    id: 'T2',
+    animalName: '中華肝吸蟲',
+    prompt: '中華肝吸蟲應該分類到哪一門？',
+    stimulusText:
+      '已知：身體扁平，左右對稱，無體節，屬於寄生性動物。請依身體構造判斷。',
+    imageUrl: '/animals/transfer/Clonorchis%20sinensis.jpg',
+  },
+  {
+    id: 'T3',
+    animalName: '中華槍烏賊',
+    prompt: '中華槍烏賊應該分類到哪一門？',
+    stimulusText:
+      '已知：身體柔軟不分節，頭部周圍有腕足，屬於頭足類。請依主要構造判斷。',
+    imageUrl: '/animals/transfer/Uroteuthis%20chinensis.jpg',
+  },
+  {
+    id: 'T4',
+    animalName: '海邊分節小動物',
+    prompt: '一種海邊常見、身體由許多相似體節組成的小動物，應該分類到哪一門？',
+    stimulusText:
+      '已知：身體柔軟、細長，由許多相似體節組成。請根據身體是否分節來判斷。',
+    imageUrl: '/animals/transfer/Perinereis%20aibuhitensis.jpg',
+  },
+  {
+    id: 'T5',
+    animalName: '蝦子',
+    prompt: '蝦子應該分類到哪一門？',
+    stimulusText:
+      '已知：身體具有外骨骼，附肢分節且有關節。請依主要構造判斷。',
+    imageUrl: '/animals/transfer/Penaeus%20monodon.jpg',
+  },
+  {
+    id: 'T6',
+    animalName: '海參',
+    prompt: '海參應該分類到哪一門？',
+    stimulusText:
+      '已知：具有管足等特徵。請依主要構造判斷。',
+    imageUrl: '/animals/transfer/Holothuria%20atra.jpg',
+  },
+]
+
 const ANIMAL_RULES: Record<
   string,
   {
@@ -289,6 +381,37 @@ const ANIMAL_RULES: Record<
     keyFeatures: ['刺絲胞', '觸手', '輻射對稱'],
     feedback: '水母的關鍵是刺絲胞與輻射對稱，不是透明漂浮。',
   },
+  珊瑚: {
+    phylum: '刺絲胞動物門',
+    keyFeatures: ['刺絲胞', '觸手', '輻射對稱'],
+    feedback: '珊瑚雖然常固定附著，但分類重點仍是刺絲胞與身體構造。',
+  },
+  中華肝吸蟲: {
+    phylum: '扁形動物門',
+    keyFeatures: ['身體扁平', '左右對稱', '無體節'],
+    feedback: '中華肝吸蟲屬扁形動物門，重點是身體扁平且無體節，不是只看它是否寄生。',
+  },
+  中華槍烏賊: {
+    phylum: '軟體動物門',
+    keyFeatures: ['外套膜', '柔軟身體', '頭足類腕足'],
+    feedback:
+      '中華槍烏賊屬軟體動物門，雖然外形和蝦、魚差很多，但判斷重點仍是外套膜與頭足類構造。',
+  },
+  海邊分節小動物: {
+    phylum: '環節動物門',
+    keyFeatures: ['身體分節', '環狀體節'],
+    feedback: '這類動物的判斷重點仍是體節，不是只看生活在海邊或身體細長。',
+  },
+  蝦子: {
+    phylum: '節肢動物門',
+    keyFeatures: ['外骨骼', '身體分節', '成對附肢'],
+    feedback: '蝦子屬節肢動物門，重點在外骨骼與分節附肢，不是只看生活在水中。',
+  },
+  海參: {
+    phylum: '棘皮動物門',
+    keyFeatures: ['棘皮', '管足', '棘皮動物特徵'],
+    feedback: '海參雖不像海星，但仍屬棘皮動物門，不能只憑外型判斷。',
+  },
 }
 
 const FEATURE_BANK = Array.from(
@@ -298,7 +421,7 @@ const FEATURE_BANK = Array.from(
 function shuffleArray<T>(items: T[]) {
   const arr = [...items]
   for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
+    const j = Math.floor((i + 1) * Math.random())
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
   return arr
@@ -361,15 +484,57 @@ function moveCardBetweenContainers(params: {
   return { nextBankIds, nextGroups }
 }
 
-function upsertEvidenceResponses(
+function upsertResponses(
   prev: EvidenceResponse[],
-  nextResponse: EvidenceResponse
+  nextResponse: EvidenceResponse,
+  orderedQuestions: { id: string }[]
 ): EvidenceResponse[] {
   const merged = [...prev.filter((item) => item.questionId !== nextResponse.questionId), nextResponse]
 
-  return evidenceQuestions
+  return orderedQuestions
     .map((question) => merged.find((item) => item.questionId === question.id))
     .filter(Boolean) as EvidenceResponse[]
+}
+
+function buildResultRows(
+  questions: QuestionLike[],
+  responses: EvidenceResponse[]
+): ResultRow[] {
+  return questions.map((question) => {
+    const animalName = inferAnimalName(question)
+    const rule = ANIMAL_RULES[animalName]
+    const response = responses.find((item) => item.questionId === question.id)
+
+    if (!response) {
+      return {
+        questionId: question.id,
+        animalName,
+        userAnswer: '未作答',
+        correctAnswer: rule?.phylum ?? null,
+        isCorrect: null,
+        selectedFeatures: [],
+        recommendedFeatures: rule?.keyFeatures ?? [],
+        feedback: '此題尚未作答。',
+      }
+    }
+
+    const isCorrect = rule ? response.answer === rule.phylum : null
+
+    return {
+      questionId: question.id,
+      animalName,
+      userAnswer: response.answer,
+      correctAnswer: rule?.phylum ?? null,
+      isCorrect,
+      selectedFeatures: response.selectedFeatures,
+      recommendedFeatures: rule?.keyFeatures ?? [],
+      feedback: rule
+        ? isCorrect
+          ? `正確。${rule.feedback}`
+          : `此題正確門別為 ${rule.phylum}。${rule.feedback}`
+        : '此題尚未設定標準答案鍵。',
+    }
+  })
 }
 
 function StepHeader({
@@ -384,7 +549,7 @@ function StepHeader({
   return (
     <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-2 shadow-sm">
       <div className="overflow-x-auto">
-        <div className="flex min-w-max gap-2">
+        <div className="flex min-w-max gap-1.5">
           {STAGE_ITEMS.map((item, index) => {
             const active = stage === item.key
             const locked = index > maxUnlockedIndex
@@ -397,7 +562,7 @@ function StepHeader({
                 onClick={() => {
                   if (!locked) setStage(item.key)
                 }}
-                className={`whitespace-nowrap rounded-xl border px-3 py-2 text-xs font-semibold md:text-sm ${
+                className={`rounded-xl border px-2.5 py-2 text-left whitespace-nowrap transition ${
                   active
                     ? 'border-black bg-black text-white'
                     : locked
@@ -405,7 +570,35 @@ function StepHeader({
                       : 'border-gray-300 bg-white text-gray-700'
                 }`}
               >
-                {index + 1}. {item.label}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      active
+                        ? 'bg-white/15 text-white'
+                        : locked
+                          ? 'bg-gray-200 text-gray-400'
+                          : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    第 {index + 1} 階段
+                  </span>
+
+                  <span className="text-sm font-bold leading-5">
+                    {item.studentLabel}
+                  </span>
+                </div>
+
+                <div
+                  className={`mt-1 hidden text-[11px] leading-4 md:block ${
+                    active
+                      ? 'text-white/75'
+                      : locked
+                        ? 'text-gray-400'
+                        : 'text-gray-500'
+                  }`}
+                >
+                  {item.teacherLabel} ｜ {item.fiveELabel}
+                </div>
               </button>
             )
           })}
@@ -490,25 +683,80 @@ function QuestionCard({
   prompt,
   stimulusText,
   imageUrl,
+  imageVariant = 'normal',
 }: {
   title: string
   prompt: string
   stimulusText: string
   imageUrl: string | null
+  imageVariant?: 'normal' | 'large'
 }) {
+  const [isZoomOpen, setIsZoomOpen] = useState(false)
+
+  const imageHeightClass =
+    imageVariant === 'large'
+      ? 'h-[360px] sm:h-[480px] lg:h-[620px]'
+      : 'h-48 sm:h-56'
+
+  const modalImageHeightClass =
+    imageVariant === 'large'
+      ? 'max-h-[88vh] w-auto max-w-full object-contain'
+      : 'max-h-[80vh] w-auto max-w-full object-contain'
+
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-      <div className="mb-2 text-sm font-semibold text-gray-500">{title}</div>
-      <div className="mb-3 text-xl font-bold text-gray-900 sm:text-2xl">{prompt}</div>
-      <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
-        {stimulusText}
+    <>
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+        <div className="mb-2 text-sm font-semibold text-gray-500">{title}</div>
+        <div className="mb-3 text-xl font-bold text-gray-900 sm:text-2xl">{prompt}</div>
+        <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+          {stimulusText}
+        </div>
+
+        {imageUrl ? (
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-3">
+            <button
+              type="button"
+              onClick={() => setIsZoomOpen(true)}
+              className="block w-full text-left"
+            >
+              <img
+                src={imageUrl}
+                alt={prompt}
+                className={`${imageHeightClass} w-full object-contain transition hover:scale-[1.01]`}
+              />
+            </button>
+
+            <div className="mt-2 text-xs text-gray-500">點擊圖片可放大檢視</div>
+          </div>
+        ) : null}
       </div>
-      {imageUrl ? (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-3">
-          <img src={imageUrl} alt={prompt} className="h-48 w-full object-contain sm:h-56" />
+
+      {isZoomOpen && imageUrl ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 px-4 py-4"
+          onClick={() => setIsZoomOpen(false)}
+        >
+          <div
+            className="relative max-h-full max-w-7xl rounded-2xl bg-white p-3 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setIsZoomOpen(false)}
+              className="absolute right-3 top-3 rounded-full bg-black px-3 py-1 text-sm font-semibold text-white"
+            >
+              關閉
+            </button>
+
+            <img
+              src={imageUrl}
+              alt={prompt}
+              className={modalImageHeightClass}
+            />
+          </div>
         </div>
       ) : null}
-    </div>
+    </>
   )
 }
 
@@ -585,11 +833,31 @@ export default function Page() {
   const [evidenceConfidence, setEvidenceConfidence] = useState(2)
   const [evidenceResponses, setEvidenceResponses] = useState<EvidenceResponse[]>([])
 
+  const [transferIndex, setTransferIndex] = useState(0)
+  const [transferAnswer, setTransferAnswer] = useState<SixPhylum | ''>('')
+  const [transferSelectedFeatures, setTransferSelectedFeatures] = useState<string[]>([])
+  const [transferReasonText, setTransferReasonText] = useState('')
+  const [transferConfidence, setTransferConfidence] = useState(2)
+  const [transferResponses, setTransferResponses] = useState<EvidenceResponse[]>([])
+
   const [selectedMovePayload, setSelectedMovePayload] = useState<DragPayload | null>(null)
-
-  const currentEvidence = evidenceQuestions[evidenceIndex]
-
   const [progressHydrated, setProgressHydrated] = useState(false)
+  const [readinessOptionMap, setReadinessOptionMap] = useState<Record<string, string[]>>({})
+
+  const stage3EvidenceQuestions = useMemo(
+    () =>
+      evidenceQuestions.filter((question) =>
+        STAGE3_EVIDENCE_IDS.includes(
+          question.id as (typeof STAGE3_EVIDENCE_IDS)[number]
+        )
+      ),
+    []
+  )
+
+  const currentEvidence = stage3EvidenceQuestions[evidenceIndex]
+  const currentTransfer = transferQuestions[transferIndex]
+
+  const isDev = process.env.NODE_ENV === 'development'
 
   const awarenessStartedAtRef = useRef<number | null>(null)
   const awarenessBaseSecondsRef = useRef(0)
@@ -598,13 +866,14 @@ export default function Page() {
   const retryTimerRef = useRef<number | null>(null)
   const progressSaveTimerRef = useRef<number | null>(null)
   const evidenceTopRef = useRef<HTMLDivElement | null>(null)
+  const transferTopRef = useRef<HTMLDivElement | null>(null)
 
-  const readinessOptionMap = useMemo(() => {
+  useEffect(() => {
     const map: Record<string, string[]> = {}
     READINESS_CHECKS.forEach((item) => {
       map[item.id] = shuffleArray(item.options)
     })
-    return map
+    setReadinessOptionMap(map)
   }, [])
 
   useEffect(() => {
@@ -654,7 +923,14 @@ export default function Page() {
         return
       }
 
-      setStage(saved.stage ?? 'stage1')
+      const savedStage: AppStage = saved.stage ?? 'stage1'
+      const savedEvidenceResponses: EvidenceResponse[] = saved.evidenceResponses ?? []
+      const savedTransferResponses: EvidenceResponse[] = saved.transferResponses ?? []
+
+      const savedEvidenceDraft = saved.evidenceDraft ?? null
+      const savedTransferDraft = saved.transferDraft ?? null
+
+      setStage(savedStage)
       setGroups(saved.groups ?? INITIAL_GROUPS)
       setBankCardIds(saved.bankCardIds ?? stage1Cards.map((card) => card.id))
       setOverallReason(saved.overallReason ?? '')
@@ -670,12 +946,36 @@ export default function Page() {
       setAwarenessCommitment(saved.awarenessCommitment ?? false)
       setAwarenessSecondsSpent(saved.awarenessSecondsSpent ?? 0)
 
-      setEvidenceResponses(saved.evidenceResponses ?? [])
+      setEvidenceResponses(savedEvidenceResponses)
+      setTransferResponses(savedTransferResponses)
+
+      if (savedStage === 'evidence') {
+        setEvidenceIndex(
+          savedEvidenceDraft?.index ??
+            Math.min(savedEvidenceResponses.length, stage3EvidenceQuestions.length - 1)
+        )
+        setEvidenceAnswer(savedEvidenceDraft?.answer ?? '')
+        setEvidenceSelectedFeatures(savedEvidenceDraft?.selectedFeatures ?? [])
+        setEvidenceReasonText(savedEvidenceDraft?.reasonText ?? '')
+        setEvidenceConfidence(savedEvidenceDraft?.confidence ?? 2)
+      }
+
+      if (savedStage === 'transfer') {
+        setTransferIndex(
+          savedTransferDraft?.index ??
+            Math.min(savedTransferResponses.length, transferQuestions.length - 1)
+        )
+        setTransferAnswer(savedTransferDraft?.answer ?? '')
+        setTransferSelectedFeatures(savedTransferDraft?.selectedFeatures ?? [])
+        setTransferReasonText(savedTransferDraft?.reasonText ?? '')
+        setTransferConfidence(savedTransferDraft?.confidence ?? 2)
+      }
+
       setProgressHydrated(true)
     } catch {
       setProgressHydrated(true)
     }
-  }, [participantCode, progressHydrated])
+  }, [participantCode, progressHydrated, stage3EvidenceQuestions.length])
 
   useEffect(() => {
     if (!participantCode || !progressHydrated) return
@@ -697,6 +997,21 @@ export default function Page() {
       awarenessCommitment,
       awarenessSecondsSpent,
       evidenceResponses,
+      transferResponses,
+      evidenceDraft: {
+        index: evidenceIndex,
+        answer: evidenceAnswer,
+        selectedFeatures: evidenceSelectedFeatures,
+        reasonText: evidenceReasonText,
+        confidence: evidenceConfidence,
+      },
+      transferDraft: {
+        index: transferIndex,
+        answer: transferAnswer,
+        selectedFeatures: transferSelectedFeatures,
+        reasonText: transferReasonText,
+        confidence: transferConfidence,
+      },
       savedAt: new Date().toISOString(),
     }
 
@@ -719,6 +1034,17 @@ export default function Page() {
     awarenessCommitment,
     awarenessSecondsSpent,
     evidenceResponses,
+    transferResponses,
+    evidenceIndex,
+    evidenceAnswer,
+    evidenceSelectedFeatures,
+    evidenceReasonText,
+    evidenceConfidence,
+    transferIndex,
+    transferAnswer,
+    transferSelectedFeatures,
+    transferReasonText,
+    transferConfidence,
   ])
 
   useEffect(() => {
@@ -732,7 +1058,6 @@ export default function Page() {
 
     const timer = window.setInterval(() => {
       if (awarenessStartedAtRef.current === null) return
-
       const delta = Math.floor((Date.now() - awarenessStartedAtRef.current) / 1000)
       setAwarenessSecondsSpent(awarenessBaseSecondsRef.current + delta)
     }, 1000)
@@ -756,6 +1081,21 @@ export default function Page() {
       window.clearTimeout(timer)
     }
   }, [stage, evidenceIndex])
+
+  useEffect(() => {
+    if (stage !== 'transfer') return
+
+    const timer = window.setTimeout(() => {
+      transferTopRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [stage, transferIndex])
 
   const nonEmptyGroups = useMemo(() => groups.filter((group) => group.cardIds.length > 0), [groups])
 
@@ -821,20 +1161,27 @@ export default function Page() {
     awarenessCommitment &&
     minStudyTimeMet
 
-  const evidenceAllComplete = evidenceResponses.length === evidenceQuestions.length
+  const evidenceAllComplete = evidenceResponses.length === stage3EvidenceQuestions.length
+  const transferAllComplete = transferResponses.length === transferQuestions.length
 
   const maxUnlockedIndex = useMemo(() => {
     let next = 0
     if (stage1Complete) next = 1
     if (stage1Complete && awarenessComplete) next = 2
     if (stage1Complete && awarenessComplete && evidenceAllComplete) next = 3
+    if (stage1Complete && awarenessComplete && evidenceAllComplete && transferAllComplete) next = 4
     return next
-  }, [stage1Complete, awarenessComplete, evidenceAllComplete])
+  }, [stage1Complete, awarenessComplete, evidenceAllComplete, transferAllComplete])
 
   const evidenceFormComplete =
     Boolean(evidenceAnswer) &&
     evidenceSelectedFeatures.length > 0 &&
     evidenceReasonText.trim().length >= 8
+
+  const transferFormComplete =
+    Boolean(transferAnswer) &&
+    transferSelectedFeatures.length > 0 &&
+    transferReasonText.trim().length >= 8
 
   const diagnosticCount = diagnosticFeatures.length
   const possibleCount = possibleFeatures.length
@@ -863,45 +1210,18 @@ export default function Page() {
     [nonEmptyGroups]
   )
 
-  const resultRows = useMemo<ResultRow[]>(() => {
-    return evidenceQuestions.map((question) => {
-      const animalName = inferAnimalName(question)
-      const rule = ANIMAL_RULES[animalName]
-      const response = evidenceResponses.find((item) => item.questionId === question.id)
+  const evidenceResultRows = useMemo<ResultRow[]>(
+    () => buildResultRows(stage3EvidenceQuestions as QuestionLike[], evidenceResponses),
+    [evidenceResponses, stage3EvidenceQuestions]
+  )
 
-      if (!response) {
-        return {
-          questionId: question.id,
-          animalName,
-          userAnswer: '未作答',
-          correctAnswer: rule?.phylum ?? null,
-          isCorrect: null,
-          selectedFeatures: [],
-          recommendedFeatures: rule?.keyFeatures ?? [],
-          feedback: '此題尚未作答。',
-        }
-      }
+  const transferResultRows = useMemo<ResultRow[]>(
+    () => buildResultRows(transferQuestions, transferResponses),
+    [transferResponses]
+  )
 
-      const isCorrect = rule ? response.answer === rule.phylum : null
-
-      return {
-        questionId: question.id,
-        animalName,
-        userAnswer: response.answer,
-        correctAnswer: rule?.phylum ?? null,
-        isCorrect,
-        selectedFeatures: response.selectedFeatures,
-        recommendedFeatures: rule?.keyFeatures ?? [],
-        feedback: rule
-          ? isCorrect
-            ? `正確。${rule.feedback}`
-            : `此題正確門別為 ${rule.phylum}。${rule.feedback}`
-          : '此題尚未設定標準答案鍵。',
-      }
-    })
-  }, [evidenceResponses])
-
-  const correctCount = resultRows.filter((row) => row.isCorrect === true).length
+  const correctCount = evidenceResultRows.filter((row) => row.isCorrect === true).length
+  const transferCorrectCount = transferResultRows.filter((row) => row.isCorrect === true).length
 
   function toggleDiagnosticFeature(feature: string) {
     if (diagnosticFeatures.includes(feature)) {
@@ -990,8 +1310,15 @@ export default function Page() {
     setEvidenceConfidence(2)
   }
 
+  function resetTransferForm() {
+    setTransferAnswer('')
+    setTransferSelectedFeatures([])
+    setTransferReasonText('')
+    setTransferConfidence(2)
+  }
+
   function openEvidenceQuestion(index: number, sourceResponses = evidenceResponses) {
-    const question = evidenceQuestions[index]
+    const question = stage3EvidenceQuestions[index]
     const saved = sourceResponses.find((item) => item.questionId === question.id)
 
     setEvidenceIndex(index)
@@ -1035,17 +1362,310 @@ export default function Page() {
       confidence: evidenceConfidence,
     }
 
-    const nextResponses = upsertEvidenceResponses(evidenceResponses, nextResponse)
+    const nextResponses = upsertResponses(
+      evidenceResponses,
+      nextResponse,
+      stage3EvidenceQuestions as { id: string }[]
+    )
     setEvidenceResponses(nextResponses)
 
     return nextResponses
+  }
+
+  function openTransferQuestion(index: number, sourceResponses = transferResponses) {
+    const question = transferQuestions[index]
+    const saved = sourceResponses.find((item) => item.questionId === question.id)
+
+    setTransferIndex(index)
+
+    if (saved) {
+      setTransferAnswer(saved.answer)
+      setTransferSelectedFeatures(saved.selectedFeatures)
+      setTransferReasonText(saved.reasonText)
+      setTransferConfidence(saved.confidence)
+    } else {
+      resetTransferForm()
+    }
+  }
+
+  function saveCurrentTransfer(): EvidenceResponse[] | null {
+    if (!currentTransfer) return null
+
+    if (transferSelectedFeatures.length === 0) {
+      window.alert('請先至少勾選一個判斷特徵。')
+      return null
+    }
+
+    if (transferReasonText.trim().length < 8) {
+      window.alert('請至少寫 8 個字，簡短說明判斷理由。')
+      return null
+    }
+
+    if (!transferAnswer) {
+      window.alert('請再選擇一個門別。')
+      return null
+    }
+
+    const animalName = inferAnimalName(currentTransfer)
+
+    const nextResponse: EvidenceResponse = {
+      questionId: currentTransfer.id,
+      animalName,
+      answer: transferAnswer,
+      selectedFeatures: transferSelectedFeatures,
+      reasonText: transferReasonText,
+      confidence: transferConfidence,
+    }
+
+    const nextResponses = upsertResponses(transferResponses, nextResponse, transferQuestions)
+    setTransferResponses(nextResponses)
+
+    return nextResponses
+  }
+
+  function buildDemoStage1Groups(): StageGroup[] {
+    const ids = stage1Cards.map((card) => card.id)
+    const group1 = ids.filter((_, index) => index % 2 === 0)
+    const group2 = ids.filter((_, index) => index % 2 === 1)
+
+    return [
+      {
+        id: 'G1',
+        name: '群組 1',
+        reason: '我先依外觀與身體構造做初步分類。',
+        cardIds: group1,
+      },
+      {
+        id: 'G2',
+        name: '群組 2',
+        reason: '我把另外一批特徵較不同的生物分成另一組。',
+        cardIds: group2,
+      },
+      {
+        id: 'G3',
+        name: '群組 3',
+        reason: '',
+        cardIds: [],
+      },
+    ]
+  }
+
+  function buildDemoEvidenceResponses(): EvidenceResponse[] {
+    return stage3EvidenceQuestions.map((question) => {
+      const animalName = inferAnimalName(question as QuestionLike)
+      const rule = ANIMAL_RULES[animalName]
+
+      return {
+        questionId: question.id,
+        animalName,
+        answer: rule?.phylum ?? '刺絲胞動物門',
+        selectedFeatures: rule?.keyFeatures?.slice(0, 2) ?? ['刺絲胞', '觸手'],
+        reasonText: `我根據 ${rule?.keyFeatures?.slice(0, 2).join('、') ?? '特徵'} 進行判斷。`,
+        confidence: 3,
+      }
+    })
+  }
+
+  function buildDemoTransferResponses(): EvidenceResponse[] {
+    return transferQuestions.map((question) => {
+      const animalName = inferAnimalName(question)
+      const rule = ANIMAL_RULES[animalName]
+
+      return {
+        questionId: question.id,
+        animalName,
+        answer: rule?.phylum ?? '刺絲胞動物門',
+        selectedFeatures: rule?.keyFeatures?.slice(0, 2) ?? ['刺絲胞', '觸手'],
+        reasonText: `我根據 ${rule?.keyFeatures?.slice(0, 2).join('、') ?? '特徵'} 進行判斷。`,
+        confidence: 3,
+      }
+    })
+  }
+
+  function seedStage2Dev() {
+    const demoGroups = buildDemoStage1Groups()
+
+    setGroups(demoGroups)
+    setBankCardIds([])
+    setOverallReason('我先根據外觀與身體構造做初步分類，再觀察有哪些共同特徵。')
+    setGroupCreateCount(3)
+    setCardMoveCount(stage1Cards.length)
+
+    setBridgeReflectAnswers({})
+    setDiagnosticFeatures([])
+    setPossibleFeatures([])
+    setCustomFeatureText('')
+    setReadinessAnswers({})
+    setReadinessAttemptCounts({})
+    setAwarenessCommitment(false)
+    setAwarenessSecondsSpent(0)
+
+    setEvidenceResponses([])
+    setTransferResponses([])
+
+    resetEvidenceForm()
+    resetTransferForm()
+    setEvidenceIndex(0)
+    setTransferIndex(0)
+
+    setStage('awareness')
+  }
+
+  function seedStage3Dev() {
+    const demoGroups = buildDemoStage1Groups()
+    const allCorrectReadinessAnswers = Object.fromEntries(
+      READINESS_CHECKS.map((item) => [item.id, item.correct])
+    )
+    const allReadinessCounts = Object.fromEntries(
+      READINESS_CHECKS.map((item) => [item.id, 1])
+    )
+
+    setGroups(demoGroups)
+    setBankCardIds([])
+    setOverallReason('我先根據外觀與身體構造做初步分類，再觀察有哪些共同特徵。')
+    setGroupCreateCount(3)
+    setCardMoveCount(stage1Cards.length)
+
+    setBridgeReflectAnswers(
+      Object.fromEntries(
+        bridgeReflectQuestions.map((question) => [question.id, question.options.slice(0, 1)])
+      )
+    )
+    setDiagnosticFeatures(['刺絲胞', '身體分節', '外骨骼'])
+    setPossibleFeatures(['會飛', '一定是星形'])
+    setCustomFeatureText('')
+    setReadinessAnswers(allCorrectReadinessAnswers)
+    setReadinessAttemptCounts(allReadinessCounts)
+    setAwarenessCommitment(true)
+    setAwarenessSecondsSpent(60)
+
+    setEvidenceResponses([])
+    setTransferResponses([])
+
+    setEvidenceIndex(0)
+    resetEvidenceForm()
+    setTransferIndex(0)
+    resetTransferForm()
+
+    setStage('evidence')
+  }
+
+  function seedStage4Dev() {
+    const demoGroups = buildDemoStage1Groups()
+    const allCorrectReadinessAnswers = Object.fromEntries(
+      READINESS_CHECKS.map((item) => [item.id, item.correct])
+    )
+    const allReadinessCounts = Object.fromEntries(
+      READINESS_CHECKS.map((item) => [item.id, 1])
+    )
+    const demoEvidenceResponses = buildDemoEvidenceResponses()
+
+    setGroups(demoGroups)
+    setBankCardIds([])
+    setOverallReason('我先根據外觀與身體構造做初步分類，再觀察有哪些共同特徵。')
+    setGroupCreateCount(3)
+    setCardMoveCount(stage1Cards.length)
+
+    setBridgeReflectAnswers(
+      Object.fromEntries(
+        bridgeReflectQuestions.map((question) => [question.id, question.options.slice(0, 1)])
+      )
+    )
+    setDiagnosticFeatures(['刺絲胞', '身體分節', '外骨骼'])
+    setPossibleFeatures(['會飛', '一定是星形'])
+    setCustomFeatureText('')
+    setReadinessAnswers(allCorrectReadinessAnswers)
+    setReadinessAttemptCounts(allReadinessCounts)
+    setAwarenessCommitment(true)
+    setAwarenessSecondsSpent(60)
+
+    setEvidenceResponses(demoEvidenceResponses)
+    setTransferResponses([])
+
+    setEvidenceIndex(0)
+    resetEvidenceForm()
+    setTransferIndex(0)
+    resetTransferForm()
+
+    setStage('transfer')
+  }
+
+  function seedStage5Dev() {
+    const demoGroups = buildDemoStage1Groups()
+    const allCorrectReadinessAnswers = Object.fromEntries(
+      READINESS_CHECKS.map((item) => [item.id, item.correct])
+    )
+    const allReadinessCounts = Object.fromEntries(
+      READINESS_CHECKS.map((item) => [item.id, 1])
+    )
+    const demoEvidenceResponses = buildDemoEvidenceResponses()
+    const demoTransferResponses = buildDemoTransferResponses()
+
+    setGroups(demoGroups)
+    setBankCardIds([])
+    setOverallReason('我先根據外觀與身體構造做初步分類，再觀察有哪些共同特徵。')
+    setGroupCreateCount(3)
+    setCardMoveCount(stage1Cards.length)
+
+    setBridgeReflectAnswers(
+      Object.fromEntries(
+        bridgeReflectQuestions.map((question) => [question.id, question.options.slice(0, 1)])
+      )
+    )
+    setDiagnosticFeatures(['刺絲胞', '身體分節', '外骨骼'])
+    setPossibleFeatures(['會飛', '一定是星形'])
+    setCustomFeatureText('')
+    setReadinessAnswers(allCorrectReadinessAnswers)
+    setReadinessAttemptCounts(allReadinessCounts)
+    setAwarenessCommitment(true)
+    setAwarenessSecondsSpent(60)
+
+    setEvidenceResponses(demoEvidenceResponses)
+    setTransferResponses(demoTransferResponses)
+
+    setEvidenceIndex(0)
+    resetEvidenceForm()
+    setTransferIndex(0)
+    resetTransferForm()
+
+    setStage('done')
+  }
+
+  function clearDevProgress() {
+    if (participantCode) {
+      localStorage.removeItem(`animal-classifier-progress:${participantCode}`)
+    }
+
+    setStage('stage1')
+    setGroups(INITIAL_GROUPS)
+    setBankCardIds(stage1Cards.map((card) => card.id))
+    setOverallReason('')
+    setGroupCreateCount(3)
+    setCardMoveCount(0)
+
+    setBridgeReflectAnswers({})
+    setDiagnosticFeatures([])
+    setPossibleFeatures([])
+    setCustomFeatureText('')
+    setReadinessAnswers({})
+    setReadinessAttemptCounts({})
+    setAwarenessCommitment(false)
+    setAwarenessSecondsSpent(0)
+
+    setEvidenceResponses([])
+    setTransferResponses([])
+
+    setEvidenceIndex(0)
+    resetEvidenceForm()
+    setTransferIndex(0)
+    resetTransferForm()
   }
 
   const exportPayload = useMemo(
     () => ({
       participantCode,
       participant: enterSession,
-      version: 'v6-responsive-touch-friendly-with-progress-snapshot',
+      version: 'v8-stage3-six-questions-with-transfer-and-dev-panel',
       stage1: {
         groups,
         bankCardIds,
@@ -1066,11 +1686,15 @@ export default function Page() {
         awarenessSecondsSpent,
       },
       evidenceResponses,
+      transferResponses,
       resultSummary: {
         correctCount,
-        totalQuestions: evidenceQuestions.length,
+        totalQuestions: stage3EvidenceQuestions.length,
+        transferCorrectCount,
+        transferTotalQuestions: transferQuestions.length,
       },
-      resultRows,
+      evidenceResultRows,
+      transferResultRows,
     }),
     [
       participantCode,
@@ -1091,8 +1715,12 @@ export default function Page() {
       awarenessCommitment,
       awarenessSecondsSpent,
       evidenceResponses,
+      transferResponses,
       correctCount,
-      resultRows,
+      transferCorrectCount,
+      stage3EvidenceQuestions.length,
+      evidenceResultRows,
+      transferResultRows,
     ]
   )
 
@@ -1226,6 +1854,56 @@ export default function Page() {
 
         <StepHeader stage={stage} setStage={setStage} maxUnlockedIndex={maxUnlockedIndex} />
 
+        {isDev ? (
+          <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 shadow-sm">
+            <div className="mb-2 text-sm font-bold text-amber-900">
+              開發者測試面板（development only）
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={seedStage2Dev}
+                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900"
+              >
+                跳到第 2 階段
+              </button>
+
+              <button
+                type="button"
+                onClick={seedStage3Dev}
+                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900"
+              >
+                跳到第 3 階段
+              </button>
+
+              <button
+                type="button"
+                onClick={seedStage4Dev}
+                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900"
+              >
+                跳到第 4 階段
+              </button>
+
+              <button
+                type="button"
+                onClick={seedStage5Dev}
+                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900"
+              >
+                跳到第 5 階段
+              </button>
+
+              <button
+                type="button"
+                onClick={clearDevProgress}
+                className="rounded-xl border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700"
+              >
+                清除測試資料
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex-1">
           {stage === 'stage1' && (
             <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
@@ -1233,7 +1911,7 @@ export default function Page() {
                 <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <h2 className="text-2xl font-black text-gray-900 md:text-3xl">
-                      第 1 階段：自由預分類
+                      第 1 階段：自由分類
                     </h2>
                     <div className="mt-2 text-sm leading-6 text-gray-600">
                       先依照你目前的直覺分類。這一階段不是要你立刻答對，而是把原本的想法說出來。
@@ -1602,7 +2280,7 @@ export default function Page() {
               </SummaryBlock>
 
               <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 2 階段：六門規則建立</h2>
+                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 2 階段：判準建立</h2>
                 <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
                   這一階段先建立規則，再進到正式判斷。系統已加入防亂猜機制：
                   選項隨機排序、至少停留 45 秒、可重作但會記錄重試次數。
@@ -1732,7 +2410,7 @@ export default function Page() {
                             <div className="mb-3 font-bold">{item.question}</div>
 
                             <div className="grid gap-2 md:grid-cols-3">
-                              {readinessOptionMap[item.id].map((option) => (
+                              {(readinessOptionMap[item.id] ?? item.options).map((option) => (
                                 <label
                                   key={option}
                                   className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm"
@@ -1833,7 +2511,7 @@ export default function Page() {
                 </SummaryBlock>
 
                 <QuestionCard
-                  title={`第 3 階段：門別判定（${evidenceIndex + 1} / ${evidenceQuestions.length}）`}
+                  title={`第 3 階段：帶提示判定（${evidenceIndex + 1} / ${stage3EvidenceQuestions.length}）`}
                   prompt={currentEvidence.prompt}
                   stimulusText={currentEvidence.stimulusText}
                   imageUrl={currentEvidence.imageUrl}
@@ -1890,7 +2568,7 @@ export default function Page() {
                   <div className="mt-1 text-sm text-gray-600">目前信心：{evidenceConfidence} / 4</div>
 
                   <div className="mt-5 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
-                    目前已完成 {evidenceResponses.length} / {evidenceQuestions.length} 題。右側提示卡可隨時參考。
+                    目前已完成 {evidenceResponses.length} / {stage3EvidenceQuestions.length} 題。右側提示卡可隨時參考。
                   </div>
 
                   <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between">
@@ -1919,15 +2597,16 @@ export default function Page() {
                         const nextResponses = saveCurrentEvidence()
                         if (!nextResponses) return
 
-                        if (evidenceIndex < evidenceQuestions.length - 1) {
+                        if (evidenceIndex < stage3EvidenceQuestions.length - 1) {
                           openEvidenceQuestion(evidenceIndex + 1, nextResponses)
                         } else {
-                          setStage('done')
+                          setStage('transfer')
+                          openTransferQuestion(0)
                         }
                       }}
                       className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
                     >
-                      {evidenceIndex < evidenceQuestions.length - 1 ? '儲存並下一題' : '完成並查看結果'}
+                      {evidenceIndex < stage3EvidenceQuestions.length - 1 ? '儲存並下一題' : '進入階段 4'}
                     </button>
                   </div>
                 </div>
@@ -1948,10 +2627,156 @@ export default function Page() {
             </section>
           )}
 
+          {stage === 'transfer' && currentTransfer && (
+            <section className="grid gap-4 xl:grid-cols-[1fr_320px]">
+              <div className="space-y-4">
+                <div ref={transferTopRef} />
+
+                <SummaryBlock title="前面三階段摘要">
+                  <div className="space-y-2">
+                    <div>已形成 {nonEmptyGroups.length} 個非空群組。</div>
+                    <div>較適合幫助分門：{diagnosticCount} 項。</div>
+                    <div>可能有幫助但不穩定：{possibleCount} 項。</div>
+                    <div>
+                      第 3 階段目前正確 {correctCount} / {stage3EvidenceQuestions.length} 題。
+                    </div>
+                  </div>
+                </SummaryBlock>
+
+                <QuestionCard
+                  title={`第 4 階段：遷移應用（${transferIndex + 1} / ${transferQuestions.length}）`}
+                  prompt={currentTransfer.prompt}
+                  stimulusText={currentTransfer.stimulusText}
+                  imageUrl={currentTransfer.imageUrl}
+                  imageVariant="large"
+                />
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                  <div className="mb-3 text-lg font-black">先勾選你判斷時最主要依據的特徵（可複選）</div>
+                  <div className="mb-2 text-sm text-gray-600">
+                    這一階段請盡量根據你前面學到的分類判準來判斷，不再提供完整提示卡。
+                  </div>
+                  <FeatureCheckboxes
+                    selected={transferSelectedFeatures}
+                    onChange={setTransferSelectedFeatures}
+                  />
+
+                  <div className="mb-2 mt-5 text-lg font-black">再簡短說明理由</div>
+                  <div className="mb-2 text-sm text-gray-600">
+                    可用句型：「我觀察到＿＿特徵，所以我推測它可能屬於＿＿。」
+                  </div>
+                  <textarea
+                    value={transferReasonText}
+                    onChange={(e) => setTransferReasonText(e.target.value)}
+                    className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
+                    placeholder="請至少寫 8 個字，簡短說明你是根據哪些特徵做判斷"
+                  />
+
+                  <div className="mb-3 mt-5 text-lg font-black">接著選擇你判定的門別</div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {SIX_PHYLA.map((option) => (
+                      <label
+                        key={option}
+                        className="flex items-center gap-2 rounded-lg border border-gray-200 p-3"
+                      >
+                        <input
+                          type="radio"
+                          name={`transfer-${currentTransfer.id}`}
+                          checked={transferAnswer === option}
+                          onChange={() => setTransferAnswer(option)}
+                        />
+                        <span>{option}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="mb-2 mt-5 text-lg font-black">最後評估你的信心程度</div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    value={transferConfidence}
+                    onChange={(e) => setTransferConfidence(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="mt-1 text-sm text-gray-600">目前信心：{transferConfidence} / 4</div>
+
+                  <div className="mt-5 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+                    目前已完成 {transferResponses.length} / {transferQuestions.length} 題。這一階段的重點是把前面學到的規則用到新案例上。
+                  </div>
+
+                  <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between">
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetIndex =
+                            evidenceResponses.length > 0 ? evidenceResponses.length - 1 : 0
+                          openEvidenceQuestion(targetIndex)
+                          setStage('evidence')
+                        }}
+                        className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
+                      >
+                        回到階段 3
+                      </button>
+                      <button
+                        type="button"
+                        disabled={transferIndex === 0}
+                        onClick={() => openTransferQuestion(transferIndex - 1)}
+                        className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                      >
+                        上一題
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={!transferFormComplete}
+                      onClick={() => {
+                        const nextResponses = saveCurrentTransfer()
+                        if (!nextResponses) return
+
+                        if (transferIndex < transferQuestions.length - 1) {
+                          openTransferQuestion(transferIndex + 1, nextResponses)
+                        } else {
+                          setStage('done')
+                        }
+                      }}
+                      className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
+                    >
+                      {transferIndex < transferQuestions.length - 1 ? '儲存並下一題' : '完成並查看結果'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <aside className="space-y-3">
+                <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                  <div className="mb-2 text-lg font-black text-gray-900">遷移提醒</div>
+                  <div className="text-sm leading-6 text-gray-600">
+                    這一階段不再提供完整六門提示卡。請回想前面學到的關鍵特徵，盡量不要只依外觀、棲地、是否有殼等線索判斷。
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                  <div className="mb-2 text-lg font-black text-gray-900">你前面整理出的線索</div>
+                  <div className="text-sm leading-6 text-gray-700">
+                    <div>
+                      較有判斷力：{diagnosticFeatures.length ? diagnosticFeatures.join('、') : '尚未記錄'}
+                    </div>
+                    <div className="mt-2">
+                      較不穩定：{possibleFeatures.length ? possibleFeatures.join('、') : '尚未記錄'}
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </section>
+          )}
+
           {stage === 'done' && (
             <section className="space-y-4">
               <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 4 階段：學習結果回饋</h2>
+                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 5 階段：結果回饋</h2>
 
                 <div
                   className={`rounded-xl p-4 text-sm leading-6 ${
@@ -1968,7 +2793,7 @@ export default function Page() {
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
                 <SummaryBlock title="階段 1">
                   <div>非空群組：{nonEmptyGroups.length}</div>
                   <div>全部卡片已分類：{bankCardIds.length === 0 ? '是' : '否'}</div>
@@ -1983,27 +2808,84 @@ export default function Page() {
 
                 <SummaryBlock title="階段 3">
                   <div>
-                    正確題數：{correctCount} / {evidenceQuestions.length}
+                    正確題數：{correctCount} / {stage3EvidenceQuestions.length}
                   </div>
                   <div className="mt-2">
-                    已完成門別判定：{evidenceResponses.length} / {evidenceQuestions.length}
+                    已完成門別判定：{evidenceResponses.length} / {stage3EvidenceQuestions.length}
+                  </div>
+                </SummaryBlock>
+
+                <SummaryBlock title="階段 4">
+                  <div>
+                    正確題數：{transferCorrectCount} / {transferQuestions.length}
+                  </div>
+                  <div className="mt-2">
+                    已完成遷移應用：{transferResponses.length} / {transferQuestions.length}
                   </div>
                 </SummaryBlock>
 
                 <SummaryBlock title="下一步建議">
                   <div>
-                    {correctCount === evidenceQuestions.length
-                      ? '你已能穩定用特徵判斷六個門。可回看第一階段，觀察自己概念如何改變。'
-                      : '請優先檢查答錯題的正確門別與推薦特徵，找出自己最常誤用的線索。'}
+                    {transferCorrectCount === transferQuestions.length
+                      ? '你已能把前面學到的分類判準用到新的案例上。可再回看第一階段，觀察自己原本的分類依據如何改變。'
+                      : '請優先檢查遷移題中答錯的題目，看看自己是否仍容易被外觀、棲地或單一線索干擾。'}
                   </div>
                 </SummaryBlock>
               </div>
 
               <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <div className="mb-4 text-2xl font-black">逐題結果與回饋</div>
+                <div className="mb-4 text-2xl font-black">第 3 階段逐題結果與回饋</div>
 
                 <div className="space-y-4">
-                  {resultRows.map((row, index) => (
+                  {evidenceResultRows.map((row, index) => (
+                    <div key={row.questionId} className="rounded-xl border border-gray-200 p-4">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                        <div className="font-bold text-gray-900">
+                          第 {index + 1} 題：{row.animalName}
+                        </div>
+                        <div
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            row.isCorrect === true
+                              ? 'bg-green-100 text-green-700'
+                              : row.isCorrect === false
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          {row.isCorrect === true ? '正確' : row.isCorrect === false ? '需修正' : '未作答'}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+                          <div>你的答案：{row.userAnswer || '未作答'}</div>
+                          <div>
+                            你的依據：{row.selectedFeatures.length ? row.selectedFeatures.join('、') : '未勾選'}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg bg-blue-50 p-3 text-sm leading-6 text-gray-700">
+                          <div>正確門別：{row.correctAnswer ?? '未設定'}</div>
+                          <div>
+                            推薦先看的特徵：
+                            {row.recommendedFeatures.length ? row.recommendedFeatures.join('、') : '未設定'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 rounded-lg bg-yellow-50 p-3 text-sm leading-6 text-yellow-900">
+                        系統回饋：{row.feedback}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                <div className="mb-4 text-2xl font-black">第 4 階段逐題結果與回饋</div>
+
+                <div className="space-y-4">
+                  {transferResultRows.map((row, index) => (
                     <div key={row.questionId} className="rounded-xl border border-gray-200 p-4">
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                         <div className="font-bold text-gray-900">
@@ -2052,13 +2934,13 @@ export default function Page() {
                   type="button"
                   onClick={() => {
                     const targetIndex =
-                      evidenceResponses.length > 0 ? evidenceResponses.length - 1 : 0
-                    openEvidenceQuestion(targetIndex)
-                    setStage('evidence')
+                      transferResponses.length > 0 ? transferResponses.length - 1 : 0
+                    openTransferQuestion(targetIndex)
+                    setStage('transfer')
                   }}
                   className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
                 >
-                  回到階段 3
+                  回到階段 4
                 </button>
                 <button
                   type="button"
