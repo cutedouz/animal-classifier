@@ -268,7 +268,7 @@ const transferQuestions: QuestionLike[] = [
     animalName: '珊瑚',
     prompt: '珊瑚應該分類到哪一門？',
     stimulusText:
-      '已知：具有刺絲胞，常呈輻射對稱。請依主要構造判斷。',
+      '任務說明：請依圖片中的主要特徵判斷。',
     imageUrl: '/animals/transfer/Goniopora%20lobata.jpg',
   },
   {
@@ -276,7 +276,7 @@ const transferQuestions: QuestionLike[] = [
     animalName: '中華肝吸蟲',
     prompt: '中華肝吸蟲應該分類到哪一門？',
     stimulusText:
-      '已知：身體扁平，左右對稱，無體節，屬於寄生性動物。請依身體構造判斷。',
+      '任務說明：請依圖片中的主要特徵判斷。',
     imageUrl: '/animals/transfer/Clonorchis%20sinensis.jpg',
   },
   {
@@ -284,7 +284,7 @@ const transferQuestions: QuestionLike[] = [
     animalName: '中華槍烏賊',
     prompt: '中華槍烏賊應該分類到哪一門？',
     stimulusText:
-      '已知：身體柔軟不分節，頭部周圍有腕足，屬於頭足類。請依主要構造判斷。',
+      '任務說明：請依圖片中的主要特徵判斷。',
     imageUrl: '/animals/transfer/Uroteuthis%20chinensis.jpg',
   },
   {
@@ -292,7 +292,7 @@ const transferQuestions: QuestionLike[] = [
     animalName: '海邊分節小動物',
     prompt: '一種海邊常見、身體由許多相似體節組成的小動物，應該分類到哪一門？',
     stimulusText:
-      '已知：身體柔軟、細長，由許多相似體節組成。請根據身體是否分節來判斷。',
+      '任務說明：請依圖片中的主要特徵判斷。',
     imageUrl: '/animals/transfer/Perinereis%20aibuhitensis.jpg',
   },
   {
@@ -300,7 +300,7 @@ const transferQuestions: QuestionLike[] = [
     animalName: '蝦子',
     prompt: '蝦子應該分類到哪一門？',
     stimulusText:
-      '已知：身體具有外骨骼，附肢分節且有關節。請依主要構造判斷。',
+      '任務說明：請依圖片中的主要特徵判斷。',
     imageUrl: '/animals/transfer/Penaeus%20monodon.jpg',
   },
   {
@@ -308,7 +308,7 @@ const transferQuestions: QuestionLike[] = [
     animalName: '海參',
     prompt: '海參應該分類到哪一門？',
     stimulusText:
-      '已知：具有管足等特徵。請依主要構造判斷。',
+      '任務說明：請依圖片中的主要特徵判斷。',
     imageUrl: '/animals/transfer/Holothuria%20atra.jpg',
   },
 ]
