@@ -96,6 +96,28 @@ type QuestionLike = {
   animalName?: string
 }
 
+type LearningItemLog = {
+  stage: 'evidence' | 'transfer'
+  questionId: string
+  animalName: string
+  enteredAt: string | null
+  submittedAt: string
+  durationMs: number | null
+  finalAnswer: SixPhylum
+  selectedFeatures: string[]
+  reasonText: string
+  confidence: number
+  isCorrect: boolean | null
+}
+
+type LearningEventLog = {
+  stage: AppStage
+  questionId: string | null
+  eventType: string
+  eventValue?: Record<string, unknown> | null
+  clientTs: string
+}
+
 const INITIAL_GROUPS: StageGroup[] = [
   { id: 'G1', name: '群組 1', reason: '', cardIds: [] },
   { id: 'G2', name: '群組 2', reason: '', cardIds: [] },
@@ -484,6 +506,21 @@ function moveCardBetweenContainers(params: {
   return { nextBankIds, nextGroups }
 }
 
+function upsertItemLogs(
+  prev: LearningItemLog[],
+  nextItemLog: LearningItemLog,
+  orderedQuestions: { id: string }[]
+): LearningItemLog[] {
+  const merged = [
+    ...prev.filter((item) => item.questionId !== nextItemLog.questionId),
+    nextItemLog,
+  ]
+
+  return orderedQuestions
+    .map((question) => merged.find((item) => item.questionId === question.id))
+    .filter(Boolean) as LearningItemLog[]
+}
+
 function upsertResponses(
   prev: EvidenceResponse[],
   nextResponse: EvidenceResponse,
@@ -684,12 +721,16 @@ function QuestionCard({
   stimulusText,
   imageUrl,
   imageVariant = 'normal',
+  onZoomOpen,
+  onZoomClose,
 }: {
   title: string
   prompt: string
   stimulusText: string
   imageUrl: string | null
   imageVariant?: 'normal' | 'large'
+  onZoomOpen?: () => void
+  onZoomClose?: () => void
 }) {
   const [isZoomOpen, setIsZoomOpen] = useState(false)
 
@@ -702,6 +743,11 @@ function QuestionCard({
     imageVariant === 'large'
       ? 'max-h-[88vh] w-auto max-w-full object-contain'
       : 'max-h-[80vh] w-auto max-w-full object-contain'
+
+  const closeZoom = () => {
+    setIsZoomOpen(false)
+    onZoomClose?.()
+  }
 
   return (
     <>
@@ -716,7 +762,10 @@ function QuestionCard({
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-3">
             <button
               type="button"
-              onClick={() => setIsZoomOpen(true)}
+              onClick={() => {
+                setIsZoomOpen(true)
+                onZoomOpen?.()
+              }}
               className="block w-full text-left"
             >
               <img
@@ -734,7 +783,7 @@ function QuestionCard({
       {isZoomOpen && imageUrl ? (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 px-4 py-4"
-          onClick={() => setIsZoomOpen(false)}
+          onClick={closeZoom}
         >
           <div
             className="relative max-h-full max-w-7xl rounded-2xl bg-white p-3 shadow-2xl"
@@ -742,7 +791,7 @@ function QuestionCard({
           >
             <button
               type="button"
-              onClick={() => setIsZoomOpen(false)}
+              onClick={closeZoom}
               className="absolute right-3 top-3 rounded-full bg-black px-3 py-1 text-sm font-semibold text-white"
             >
               關閉
@@ -832,6 +881,8 @@ export default function Page() {
   const [evidenceReasonText, setEvidenceReasonText] = useState('')
   const [evidenceConfidence, setEvidenceConfidence] = useState(2)
   const [evidenceResponses, setEvidenceResponses] = useState<EvidenceResponse[]>([])
+  const [evidenceItemLogs, setEvidenceItemLogs] = useState<LearningItemLog[]>([])
+  const [eventLogs, setEventLogs] = useState<LearningEventLog[]>([])
 
   const [transferIndex, setTransferIndex] = useState(0)
   const [transferAnswer, setTransferAnswer] = useState<SixPhylum | ''>('')
@@ -839,6 +890,7 @@ export default function Page() {
   const [transferReasonText, setTransferReasonText] = useState('')
   const [transferConfidence, setTransferConfidence] = useState(2)
   const [transferResponses, setTransferResponses] = useState<EvidenceResponse[]>([])
+  const [transferItemLogs, setTransferItemLogs] = useState<LearningItemLog[]>([])
 
   const [selectedMovePayload, setSelectedMovePayload] = useState<DragPayload | null>(null)
   const [progressHydrated, setProgressHydrated] = useState(false)
@@ -867,6 +919,30 @@ export default function Page() {
   const progressSaveTimerRef = useRef<number | null>(null)
   const evidenceTopRef = useRef<HTMLDivElement | null>(null)
   const transferTopRef = useRef<HTMLDivElement | null>(null)
+  const evidenceQuestionEnteredAtRef = useRef<string | null>(null)
+  const evidenceQuestionStartedAtRef = useRef<number | null>(null)
+  const transferQuestionEnteredAtRef = useRef<string | null>(null)
+  const transferQuestionStartedAtRef = useRef<number | null>(null)
+  const evidenceTimingQuestionIdRef = useRef<string | null>(null)
+  const transferTimingQuestionIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+  if (stage !== 'evidence' || !currentEvidence) return
+  if (evidenceTimingQuestionIdRef.current === currentEvidence.id) return
+
+  evidenceTimingQuestionIdRef.current = currentEvidence.id
+  evidenceQuestionEnteredAtRef.current = new Date().toISOString()
+  evidenceQuestionStartedAtRef.current = Date.now()
+}, [stage, currentEvidence?.id])
+
+  useEffect(() => {
+  if (stage !== 'transfer' || !currentTransfer) return
+  if (transferTimingQuestionIdRef.current === currentTransfer.id) return
+
+  transferTimingQuestionIdRef.current = currentTransfer.id
+  transferQuestionEnteredAtRef.current = new Date().toISOString()
+  transferQuestionStartedAtRef.current = Date.now()
+}, [stage, currentTransfer?.id])
 
   useEffect(() => {
     const map: Record<string, string[]> = {}
@@ -948,6 +1024,9 @@ export default function Page() {
 
       setEvidenceResponses(savedEvidenceResponses)
       setTransferResponses(savedTransferResponses)
+      setEvidenceItemLogs(saved.evidenceItemLogs ?? [])
+      setTransferItemLogs(saved.transferItemLogs ?? [])
+      setEventLogs(saved.eventLogs ?? [])
 
       if (savedStage === 'evidence') {
         setEvidenceIndex(
@@ -981,39 +1060,42 @@ export default function Page() {
     if (!participantCode || !progressHydrated) return
 
     const progress = {
-      participantCode,
-      stage,
-      groups,
-      bankCardIds,
-      overallReason,
-      groupCreateCount,
-      cardMoveCount,
-      bridgeReflectAnswers,
-      diagnosticFeatures,
-      possibleFeatures,
-      customFeatureText,
-      readinessAnswers,
-      readinessAttemptCounts,
-      awarenessCommitment,
-      awarenessSecondsSpent,
-      evidenceResponses,
-      transferResponses,
-      evidenceDraft: {
-        index: evidenceIndex,
-        answer: evidenceAnswer,
-        selectedFeatures: evidenceSelectedFeatures,
-        reasonText: evidenceReasonText,
-        confidence: evidenceConfidence,
-      },
-      transferDraft: {
-        index: transferIndex,
-        answer: transferAnswer,
-        selectedFeatures: transferSelectedFeatures,
-        reasonText: transferReasonText,
-        confidence: transferConfidence,
-      },
-      savedAt: new Date().toISOString(),
-    }
+  participantCode,
+  stage,
+  groups,
+  bankCardIds,
+  overallReason,
+  groupCreateCount,
+  cardMoveCount,
+  bridgeReflectAnswers,
+  diagnosticFeatures,
+  possibleFeatures,
+  customFeatureText,
+  readinessAnswers,
+  readinessAttemptCounts,
+  awarenessCommitment,
+  awarenessSecondsSpent,
+  evidenceResponses,
+  transferResponses,
+  evidenceItemLogs,
+  transferItemLogs,
+  eventLogs,
+  evidenceDraft: {
+    index: evidenceIndex,
+    answer: evidenceAnswer,
+    selectedFeatures: evidenceSelectedFeatures,
+    reasonText: evidenceReasonText,
+    confidence: evidenceConfidence,
+  },
+  transferDraft: {
+    index: transferIndex,
+    answer: transferAnswer,
+    selectedFeatures: transferSelectedFeatures,
+    reasonText: transferReasonText,
+    confidence: transferConfidence,
+  },
+  savedAt: new Date().toISOString(),
+}
 
     localStorage.setItem(`animal-classifier-progress:${participantCode}`, JSON.stringify(progress))
   }, [
@@ -1035,6 +1117,8 @@ export default function Page() {
     awarenessSecondsSpent,
     evidenceResponses,
     transferResponses,
+    evidenceItemLogs,
+    transferItemLogs,
     evidenceIndex,
     evidenceAnswer,
     evidenceSelectedFeatures,
@@ -1152,14 +1236,11 @@ export default function Page() {
     (item) => readinessAnswers[item.id] === item.correct
   )
 
-  const minStudyTimeMet = awarenessSecondsSpent >= 45
-
   const awarenessComplete =
-    reflectionComplete &&
-    featureChoiceComplete &&
-    readinessComplete &&
-    awarenessCommitment &&
-    minStudyTimeMet
+  reflectionComplete &&
+  featureChoiceComplete &&
+  readinessComplete &&
+  awarenessCommitment
 
   const evidenceAllComplete = evidenceResponses.length === stage3EvidenceQuestions.length
   const transferAllComplete = transferResponses.length === transferQuestions.length
@@ -1303,6 +1384,10 @@ export default function Page() {
     )
   }
 
+  function pushEventLog(log: LearningEventLog) {
+  setEventLogs((prev) => [...prev, log])
+  }
+
   function resetEvidenceForm() {
     setEvidenceAnswer('')
     setEvidenceSelectedFeatures([])
@@ -1320,6 +1405,9 @@ export default function Page() {
   function openEvidenceQuestion(index: number, sourceResponses = evidenceResponses) {
     const question = stage3EvidenceQuestions[index]
     const saved = sourceResponses.find((item) => item.questionId === question.id)
+
+    evidenceQuestionEnteredAtRef.current = new Date().toISOString()
+    evidenceQuestionStartedAtRef.current = Date.now()
 
     setEvidenceIndex(index)
 
@@ -1352,6 +1440,7 @@ export default function Page() {
     }
 
     const animalName = inferAnimalName(currentEvidence)
+    const rule = ANIMAL_RULES[animalName]
 
     const nextResponse: EvidenceResponse = {
       questionId: currentEvidence.id,
@@ -1369,12 +1458,42 @@ export default function Page() {
     )
     setEvidenceResponses(nextResponses)
 
+    const submittedAt = new Date().toISOString()
+    const durationMs =
+      evidenceQuestionStartedAtRef.current !== null
+        ? Math.max(0, Date.now() - evidenceQuestionStartedAtRef.current)
+        : null
+
+    const nextItemLog: LearningItemLog = {
+      stage: 'evidence',
+      questionId: currentEvidence.id,
+      animalName,
+      enteredAt: evidenceQuestionEnteredAtRef.current,
+      submittedAt,
+      durationMs,
+      finalAnswer: evidenceAnswer,
+      selectedFeatures: evidenceSelectedFeatures,
+      reasonText: evidenceReasonText,
+      confidence: evidenceConfidence,
+      isCorrect: rule ? evidenceAnswer === rule.phylum : null,
+    }
+
+    const nextItemLogs = upsertItemLogs(
+      evidenceItemLogs,
+      nextItemLog,
+      stage3EvidenceQuestions as { id: string }[]
+    )
+    setEvidenceItemLogs(nextItemLogs)
+
     return nextResponses
   }
 
   function openTransferQuestion(index: number, sourceResponses = transferResponses) {
     const question = transferQuestions[index]
     const saved = sourceResponses.find((item) => item.questionId === question.id)
+
+    transferQuestionEnteredAtRef.current = new Date().toISOString()
+    transferQuestionStartedAtRef.current = Date.now()
 
     setTransferIndex(index)
 
@@ -1407,6 +1526,7 @@ export default function Page() {
     }
 
     const animalName = inferAnimalName(currentTransfer)
+    const rule = ANIMAL_RULES[animalName]
 
     const nextResponse: EvidenceResponse = {
       questionId: currentTransfer.id,
@@ -1419,6 +1539,33 @@ export default function Page() {
 
     const nextResponses = upsertResponses(transferResponses, nextResponse, transferQuestions)
     setTransferResponses(nextResponses)
+
+    const submittedAt = new Date().toISOString()
+    const durationMs =
+      transferQuestionStartedAtRef.current !== null
+        ? Math.max(0, Date.now() - transferQuestionStartedAtRef.current)
+        : null
+
+    const nextItemLog: LearningItemLog = {
+      stage: 'transfer',
+      questionId: currentTransfer.id,
+      animalName,
+      enteredAt: transferQuestionEnteredAtRef.current,
+      submittedAt,
+      durationMs,
+      finalAnswer: transferAnswer,
+      selectedFeatures: transferSelectedFeatures,
+      reasonText: transferReasonText,
+      confidence: transferConfidence,
+      isCorrect: rule ? transferAnswer === rule.phylum : null,
+    }
+
+    const nextItemLogs = upsertItemLogs(
+      transferItemLogs,
+      nextItemLog,
+      transferQuestions
+    )
+    setTransferItemLogs(nextItemLogs)
 
     return nextResponses
   }
@@ -1502,6 +1649,8 @@ export default function Page() {
 
     setEvidenceResponses([])
     setTransferResponses([])
+    setEvidenceItemLogs([])
+    setTransferItemLogs([])
 
     resetEvidenceForm()
     resetTransferForm()
@@ -1541,6 +1690,8 @@ export default function Page() {
 
     setEvidenceResponses([])
     setTransferResponses([])
+    setEvidenceItemLogs([])
+    setTransferItemLogs([])
 
     setEvidenceIndex(0)
     resetEvidenceForm()
@@ -1581,6 +1732,8 @@ export default function Page() {
 
     setEvidenceResponses(demoEvidenceResponses)
     setTransferResponses([])
+    setEvidenceItemLogs([])
+    setTransferItemLogs([])
 
     setEvidenceIndex(0)
     resetEvidenceForm()
@@ -1622,6 +1775,8 @@ export default function Page() {
 
     setEvidenceResponses(demoEvidenceResponses)
     setTransferResponses(demoTransferResponses)
+    setEvidenceItemLogs([])
+    setTransferItemLogs([])
 
     setEvidenceIndex(0)
     resetEvidenceForm()
@@ -1654,6 +1809,8 @@ export default function Page() {
 
     setEvidenceResponses([])
     setTransferResponses([])
+    setEvidenceItemLogs([])
+    setTransferItemLogs([])
 
     setEvidenceIndex(0)
     resetEvidenceForm()
@@ -1665,7 +1822,7 @@ export default function Page() {
     () => ({
       participantCode,
       participant: enterSession,
-      version: 'v8-stage3-six-questions-with-transfer-and-dev-panel',
+      version: 'v9-stage3-with-event-logs',
       stage1: {
         groups,
         bankCardIds,
@@ -1687,6 +1844,10 @@ export default function Page() {
       },
       evidenceResponses,
       transferResponses,
+      evidenceItemLogs,
+      transferItemLogs,
+      eventLogs,
+      correctCount,
       resultSummary: {
         correctCount,
         totalQuestions: stage3EvidenceQuestions.length,
@@ -1697,31 +1858,34 @@ export default function Page() {
       transferResultRows,
     }),
     [
-      participantCode,
-      enterSession,
-      groups,
-      bankCardIds,
-      overallReason,
-      groupCreateCount,
-      cardMoveCount,
-      bridgeReflectAnswers,
-      diagnosticFeatures,
-      possibleFeatures,
-      customFeatureText,
-      readinessAnswers,
-      readinessAttemptCounts,
-      readinessRetryCount,
-      readinessFirstPassCount,
-      awarenessCommitment,
-      awarenessSecondsSpent,
-      evidenceResponses,
-      transferResponses,
-      correctCount,
-      transferCorrectCount,
-      stage3EvidenceQuestions.length,
-      evidenceResultRows,
-      transferResultRows,
-    ]
+  participantCode,
+  enterSession,
+  groups,
+  bankCardIds,
+  overallReason,
+  groupCreateCount,
+  cardMoveCount,
+  bridgeReflectAnswers,
+  diagnosticFeatures,
+  possibleFeatures,
+  customFeatureText,
+  readinessAnswers,
+  readinessAttemptCounts,
+  readinessRetryCount,
+  readinessFirstPassCount,
+  awarenessCommitment,
+  awarenessSecondsSpent,
+  evidenceResponses,
+  transferResponses,
+  evidenceItemLogs,
+  transferItemLogs,
+  eventLogs,
+  correctCount,
+  transferCorrectCount,
+  stage3EvidenceQuestions.length,
+  evidenceResultRows,
+  transferResultRows,
+]
   )
 
   const exportHash = useMemo(() => JSON.stringify(exportPayload), [exportPayload])
@@ -1729,6 +1893,11 @@ export default function Page() {
   const submitStudentData = useCallback(
     async (mode: 'progress' | 'final') => {
       if (!submissionKey || !enterSession) return false
+
+      console.log('submit payload =', exportPayload)
+      console.log('evidenceItemLogs =', exportPayload.evidenceItemLogs)
+      console.log('transferItemLogs =', exportPayload.transferItemLogs)
+      console.log('eventLogs =', exportPayload.eventLogs)
 
       const response = await fetch('/api/student-submit', {
         method: 'POST',
@@ -2282,8 +2451,8 @@ export default function Page() {
               <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                 <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 2 階段：判準建立</h2>
                 <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
-                  這一階段先建立規則，再進到正式判斷。系統已加入防亂猜機制：
-                  選項隨機排序、至少停留 45 秒、可重作但會記錄重試次數。
+                  這一階段先建立規則，再進到正式判斷。系統會記錄學習時間，
+                  選項順序隨機化，且可重作並記錄重試次數。
                 </div>
               </div>
 
@@ -2393,10 +2562,7 @@ export default function Page() {
                     </div>
 
                     <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700">
-                      目前學習時間：{awarenessSecondsSpent} 秒　
-                      {minStudyTimeMet
-                        ? '（已達最短學習時間）'
-                        : `（至少需 45 秒，尚差 ${45 - awarenessSecondsSpent} 秒）`}
+                       目前學習時間：{awarenessSecondsSpent} 秒
                     </div>
 
                     <div className="space-y-4">
@@ -2511,11 +2677,29 @@ export default function Page() {
                 </SummaryBlock>
 
                 <QuestionCard
-                  title={`第 3 階段：帶提示判定（${evidenceIndex + 1} / ${stage3EvidenceQuestions.length}）`}
-                  prompt={currentEvidence.prompt}
-                  stimulusText={currentEvidence.stimulusText}
-                  imageUrl={currentEvidence.imageUrl}
-                />
+  title={`第 3 階段：帶提示判定（${evidenceIndex + 1} / ${stage3EvidenceQuestions.length}）`}
+  prompt={currentEvidence.prompt}
+  stimulusText={currentEvidence.stimulusText}
+  imageUrl={currentEvidence.imageUrl}
+  onZoomOpen={() =>
+    pushEventLog({
+      stage: 'evidence',
+      questionId: currentEvidence.id,
+      eventType: 'image_zoom_open',
+      eventValue: { imageUrl: currentEvidence.imageUrl },
+      clientTs: new Date().toISOString(),
+    })
+  }
+  onZoomClose={() =>
+    pushEventLog({
+      stage: 'evidence',
+      questionId: currentEvidence.id,
+      eventType: 'image_zoom_close',
+      eventValue: { imageUrl: currentEvidence.imageUrl },
+      clientTs: new Date().toISOString(),
+    })
+  }
+/>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                   <div className="mb-3 text-lg font-black">先勾選你判斷時最主要依據的特徵（可複選）</div>
@@ -2644,12 +2828,30 @@ export default function Page() {
                 </SummaryBlock>
 
                 <QuestionCard
-                  title={`第 4 階段：遷移應用（${transferIndex + 1} / ${transferQuestions.length}）`}
-                  prompt={currentTransfer.prompt}
-                  stimulusText={currentTransfer.stimulusText}
-                  imageUrl={currentTransfer.imageUrl}
-                  imageVariant="large"
-                />
+  title={`第 4 階段：遷移應用（${transferIndex + 1} / ${transferQuestions.length}）`}
+  prompt={currentTransfer.prompt}
+  stimulusText={currentTransfer.stimulusText}
+  imageUrl={currentTransfer.imageUrl}
+  imageVariant="large"
+  onZoomOpen={() =>
+    pushEventLog({
+      stage: 'transfer',
+      questionId: currentTransfer.id,
+      eventType: 'image_zoom_open',
+      eventValue: { imageUrl: currentTransfer.imageUrl },
+      clientTs: new Date().toISOString(),
+    })
+  }
+  onZoomClose={() =>
+    pushEventLog({
+      stage: 'transfer',
+      questionId: currentTransfer.id,
+      eventType: 'image_zoom_close',
+      eventValue: { imageUrl: currentTransfer.imageUrl },
+      clientTs: new Date().toISOString(),
+    })
+  }
+/>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
                   <div className="mb-3 text-lg font-black">先勾選你判斷時最主要依據的特徵（可複選）</div>

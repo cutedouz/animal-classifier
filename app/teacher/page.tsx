@@ -1,1426 +1,824 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-
-type StageKey = 'inactive' | 'stage1' | 'awareness' | 'evidence' | 'done'
-type RiskLevel = 'high' | 'medium' | 'low'
-
-type StudentRow = {
-  id: string
-  participantCode: string
-  schoolCode: string
-  schoolYear: string
-  semester: string
-  grade: string
-  className: string
-  seatNo: string
-  maskedName: string
-  currentStageKey: StageKey
-  currentStage: string
-  statusLabel: string
-  hasStarted: boolean
-  completed: boolean
-  stage1Complete: boolean
-  answeredCount: number
-  totalQuestionCount: number
-  correctCount: number
-  accuracy: number
-  overallAccuracy: number
-  awarenessSecondsSpent: number
-  readinessRetryCount: number
-  readinessFirstPassCount: number
-  cardMoveCount: number
-  groupCreateCount: number
-  stage1CueOrientation: string
-  stage2CueOrientation: string
-  changeCategory: string
-  changeNarrative: string
-  riskLevel: RiskLevel
-  riskFlags: string[]
-  updatedAt: string
-  resultRowsActual: {
-    animalName: string
-    correctPhylum: string
-    userAnswer: string
-    isCorrect: boolean
-  }[]
-  diagnosticFeatures: string[]
-  possibleFeatures: string[]
-  diagnosticStructuralCount: number
-  diagnosticSurfaceCount: number
-  possibleSurfaceCount: number
-  stage1AlignmentScore: number
-  mixedGroupCount: number
-  prePostDelta: number
-  prePostNarrative: string
-}
-
-type ReportResponse = {
-  ok: boolean
-  totalRecords: number
-  studentRows: StudentRow[]
-  filterOptions: {
-    schools: string[]
-    grades: string[]
-    classes: string[]
-    students: {
-      participantCode: string
-      label: string
-    }[]
-  }
-}
+import { useEffect, useMemo, useState } from 'react'
 
 type Summary = {
   totalStudents: number
-  activeStudents: number
   completedStudents: number
-  completionRate: number
-  avgAccuracyCompleted: number
-  avgAwarenessSecondsCompleted: number
-  avgReadinessRetryCountCompleted: number
-  avgAnsweredCoverage: number
-  positiveShiftRate: number
-  highRiskStudents: number
-  avgStage1Alignment: number
-  avgPostOverallAccuracy: number
-  avgPrePostDelta: number
-  comparableStudents: number
+  completionRate: number | null
+  evidenceAccuracy: number | null
+  transferAccuracy: number | null
+  sdi: number | null
+  avgEvidenceDurationSec: number | null
+  avgTransferDurationSec: number | null
+  medianEvidenceDurationSec: number | null
+  medianTransferDurationSec: number | null
+  zoomUserRate: number | null
+  avgStructuralFeatureRate: number | null
+  avgReasonCharCount: number | null
 }
 
-type StageFunnel = {
-  inactive: number
-  stage1: number
-  awareness: number
-  evidence: number
-  done: number
+type StageBucket = { stage: string; count: number }
+type RiskBucket = { level: string; count: number }
+
+type StudentRow = {
+  participantCode: string
+  schoolCode: string | null
+  grade: string | null
+  className: string | null
+  seatNo: string | null
+  maskedName: string | null
+  currentStage: string | null
+  isCompleted: boolean
+  evidenceAccuracy: number | null
+  transferAccuracy: number | null
+  sdi: number | null
+  avgEvidenceDurationSec: number | null
+  avgTransferDurationSec: number | null
+  zoomOpenCount: number
+  zoomQuestionCount: number
+  evidenceCount: number
+  transferCount: number
+  structuralFeatureRate: number | null
+  selectedFeatureCountAvg: number | null
+  reasonCharCountAvg: number | null
+  awarenessSecondsSpent: number | null
+  diagnosticFeatureCount: number | null
+  possibleFeatureCount: number | null
+  readinessRetryCount: number | null
+  readinessFirstPassRate: number | null
+  stage1GroupCount: number | null
+  stage1OverallReasonLength: number | null
+  riskLevel: '高' | '中' | '低' | '未完成' | '資料不足'
+  updatedAt: string | null
 }
 
-type CapabilityIndicator = {
-  dimension: string
-  count: number
-  total: number
-  rate: number
-  interpretation: string
+type QuestionMetric = {
+  key: string
+  stage: string
+  questionId: string
+  animalName: string | null
+  respondents: number
+  studentCount: number
+  accuracy: number | null
+  avgDurationSec: number | null
+  medianDurationSec: number | null
+  avgConfidence: number | null
+  avgSelectedFeatureCount: number | null
+  avgReasonCharCount: number | null
+  zoomOpenCount: number
+  zoomUserRate: number | null
+  topWrongAnswers: string[]
+  topWrongFeatures: string[]
+  highConfidenceWrongRate: number | null
+}
+
+type FeatureMetric = {
+  feature: string
+  cueType: '結構線索' | '表面線索' | '待分類'
+  selectedCount: number
+  studentCount: number
+  correctRateWhenSelected: number | null
+  evidenceCount: number
+  transferCount: number
+  wrongSelectionRate: number | null
+}
+
+type MisconceptionMetric = {
+  feature: string
+  cueType: '結構線索' | '表面線索' | '待分類'
+  wrongCount: number
+  wrongStudentCount: number
+  wrongQuestionCount: number
+  highConfidenceWrongCount: number
 }
 
 type InsightCard = {
   title: string
-  evidence: string
-  interpretation: string
-  teachingSuggestion: string
+  body: string
+  severity: 'info' | 'warn' | 'strong'
 }
 
-type ItemAccuracyRow = {
-  animalName: string
-  correctPhylum: string
-  respondents: number
-  correct: number
-  accuracy: number
-  topWrongAnswers: { answer: string; count: number }[]
-  interpretation: string
+type SampleBases = {
+  totalStudents: number
+  completedStudents: number
+  evidenceStudents: number
+  evidenceItems: number
+  transferStudents: number
+  transferItems: number
+  zoomStudents: number
+  zoomEvents: number
+  awarenessStudents: number
 }
 
-type MisconceptionRow = {
-  animalName: string
-  correctPhylum: string
-  wrongAnswer: string
-  count: number
-  interpretation: string
-}
-
-type FeatureUsageRow = {
-  feature: string
-  featureType: '結構線索' | '表面線索' | '其他'
-  diagnostic: number
-  possible: number
-  total: number
-  interpretation: string
-}
-
-type ClassSummaryRow = {
+type SampleWarning = {
   key: string
+  level: 'warn' | 'info'
+  message: string
+}
+
+type DashboardResponse = {
+  ok: true
+  filters: {
+    schoolCodes: string[]
+    grades: string[]
+    classNames: string[]
+    stages: string[]
+  }
+  summary: Summary
+  sampleBases: SampleBases
+  sampleWarnings: SampleWarning[]
+  stageFunnel: StageBucket[]
+  riskDistribution: RiskBucket[]
+  studentRows: StudentRow[]
+  highRiskStudents: StudentRow[]
+  strongestStudents: StudentRow[]
+  questionMetrics: QuestionMetric[]
+  featureMetrics: FeatureMetric[]
+  misconceptionMetrics: MisconceptionMetric[]
+  insightCards: InsightCard[]
+  counts: {
+    records: number
+    itemLogs: number
+    eventLogs: number
+  }
+}
+
+type FiltersState = {
   schoolCode: string
   grade: string
   className: string
-  studentCount: number
-  completedCount: number
-  completionRate: number
-  avgAccuracyCompleted: number
-  avgAwarenessSeconds: number
-  avgReadinessRetryCount: number
-  avgStage1Alignment: number
-  avgPrePostDelta: number
+  participantCode: string
+  currentStage: string
+  completedOnly: boolean
+  riskOnly: boolean
 }
 
-const STRUCTURAL_FEATURES = new Set([
-  '刺絲胞',
-  '觸手',
-  '輻射對稱',
-  '袋狀身體',
-  '身體扁平',
-  '左右對稱',
-  '無體節',
-  '外套膜',
-  '肌肉足',
-  '身體分節',
-  '環狀體節',
-  '外骨骼',
-  '成對附肢',
-  '棘皮',
-  '管足',
-  '五輻對稱',
-])
-
-const SURFACE_FEATURES = new Set([
-  '顏色鮮豔',
-  '外型像花',
-  '身體細長',
-  '生活在水中',
-  '只要有殼就一定是',
-  '看起來很軟',
-  '身體長條',
-  '生活在泥土或水裡',
-  '會飛',
-  '腳很多',
-  '住在海邊',
-  '一定是星形',
-  '表面粗糙就算',
-])
-
-function pct(value: number) {
-  return `${(value * 100).toFixed(1)}%`
+const INITIAL_FILTERS: FiltersState = {
+  schoolCode: '',
+  grade: '',
+  className: '',
+  participantCode: '',
+  currentStage: '',
+  completedOnly: false,
+  riskOnly: false,
 }
 
-function toNumber(value: unknown, fallback = 0) {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : fallback
+function pct(value: number | null | undefined, digits = 0) {
+  if (value == null || Number.isNaN(value)) return '—'
+  return `${(value * 100).toFixed(digits)}%`
 }
 
-function cleanStr(value: unknown) {
-  return String(value ?? '').trim()
+function num(value: number | null | undefined, digits = 1) {
+  if (value == null || Number.isNaN(value)) return '—'
+  return value.toFixed(digits)
 }
 
-function badgeClass(status: string) {
-  if (status.includes('完成')) return 'bg-green-100 text-green-800'
-  if (status.includes('第3')) return 'bg-blue-100 text-blue-800'
-  if (status.includes('第2')) return 'bg-amber-100 text-amber-800'
-  if (status.includes('第1')) return 'bg-slate-100 text-slate-800'
-  return 'bg-gray-100 text-gray-700'
-}
-
-function riskClass(level: RiskLevel) {
-  if (level === 'high') return 'bg-red-100 text-red-800'
-  if (level === 'medium') return 'bg-amber-100 text-amber-800'
-  return 'bg-green-100 text-green-800'
-}
-
-function getMisconceptionInterpretation(
-  animalName: string,
-  correctPhylum: string,
-  wrongAnswer: string
-) {
-  const wrong = cleanStr(wrongAnswer) || '未作答'
-
-  const baseByPhylum: Record<string, string> = {
-    刺絲胞動物門:
-      '這類錯誤通常表示學生仍以柔軟、漂浮或像花的外觀判斷，尚未穩定抓到刺絲胞與觸手。',
-    扁形動物門:
-      '這類錯誤通常表示學生把細長外形或生活環境當成主線索，尚未穩定抓到扁平與無體節。',
-    軟體動物門:
-      '這類錯誤通常表示學生仍用有殼或柔軟外觀做表面判斷，尚未穩定抓到外套膜與肌肉足。',
-    環節動物門:
-      '這類錯誤通常表示學生只看長條或柔軟外觀，尚未穩定抓到身體分節與環狀體節。',
-    節肢動物門:
-      '這類錯誤通常表示學生以是否會飛、生活環境或腳的多寡做表面判斷，尚未穩定抓到外骨骼與成對附肢。',
-    棘皮動物門:
-      '這類錯誤通常表示學生仍以星形、海洋棲地或表面粗糙做直觀判斷，尚未穩定抓到棘皮與管足。',
+function stageLabel(stage: string | null) {
+  const map: Record<string, string> = {
+    stage1: '第 1 階段',
+    awareness: '第 2 階段',
+    evidence: '第 3 階段',
+    transfer: '第 4 階段',
+    done: '完成',
   }
-
-  return `${animalName} 常被誤判為 ${wrong}。${baseByPhylum[correctPhylum] ?? '這反映學生尚未穩定抓到該門別的診斷性特徵。'}`
+  return stage ? (map[stage] ?? stage) : '未記錄'
 }
 
-function getFeatureType(feature: string): '結構線索' | '表面線索' | '其他' {
-  if (STRUCTURAL_FEATURES.has(feature)) return '結構線索'
-  if (SURFACE_FEATURES.has(feature)) return '表面線索'
-  return '其他'
+function severityTone(level: 'strong' | 'warn' | 'info') {
+  if (level === 'strong') return 'border-red-200 bg-red-50'
+  if (level === 'warn') return 'border-yellow-200 bg-yellow-50'
+  return 'border-blue-200 bg-blue-50'
 }
 
-function getFeatureInterpretation(feature: string, diagnostic: number, possible: number) {
-  const featureType = getFeatureType(feature)
-
-  if (featureType === '結構線索') {
-    if (diagnostic >= possible) {
-      return '多數學生已把此特徵視為較具診斷力的分類依據。'
-    }
-    return '學生已注意到此特徵，但仍有部分人尚未把它穩定升格為關鍵線索。'
-  }
-
-  if (featureType === '表面線索') {
-    if (diagnostic > possible) {
-      return '這是表面線索，但仍有不少學生把它當成關鍵依據，值得教師回教。'
-    }
-    return '多數學生已知道此特徵較適合作為輔助，而非決定性線索。'
-  }
-
-  return '此特徵的教學定位仍需再觀察。'
+function riskTone(level: StudentRow['riskLevel'] | string) {
+  if (level === '高') return 'bg-red-100 text-red-700'
+  if (level === '中') return 'bg-yellow-100 text-yellow-800'
+  if (level === '低') return 'bg-green-100 text-green-700'
+  if (level === '未完成') return 'bg-gray-100 text-gray-700'
+  return 'bg-slate-100 text-slate-700'
 }
 
-function buildSummary(rows: StudentRow[]): Summary {
-  const totalStudents = rows.length
-  const activeStudents = rows.filter((row) => row.hasStarted).length
-  const completedRows = rows.filter((row) => row.completed)
-  const completedStudents = completedRows.length
-  const completionRate = totalStudents > 0 ? completedStudents / totalStudents : 0
-
-  const avgAccuracyCompleted =
-    completedStudents > 0
-      ? completedRows.reduce((sum, row) => sum + row.accuracy, 0) / completedStudents
-      : 0
-
-  const avgAwarenessSecondsCompleted =
-    completedStudents > 0
-      ? completedRows.reduce((sum, row) => sum + row.awarenessSecondsSpent, 0) /
-        completedStudents
-      : 0
-
-  const avgReadinessRetryCountCompleted =
-    completedStudents > 0
-      ? completedRows.reduce((sum, row) => sum + row.readinessRetryCount, 0) /
-        completedStudents
-      : 0
-
-  const avgAnsweredCoverage =
-    totalStudents > 0
-      ? rows.reduce(
-          (sum, row) =>
-            sum +
-            (row.totalQuestionCount > 0 ? row.answeredCount / row.totalQuestionCount : 0),
-          0
-        ) / totalStudents
-      : 0
-
-  const positiveShiftStudents = rows.filter((row) =>
-    ['由表面轉向結構', '由混合走向規則化', '在第二階段建立結構線索'].includes(
-      row.changeCategory
-    )
-  ).length
-
-  const positiveShiftRate =
-    totalStudents > 0 ? positiveShiftStudents / totalStudents : 0
-
-  const highRiskStudents = rows.filter((row) => row.riskLevel === 'high').length
-
-  const comparableRows = rows.filter(
-    (row) => row.stage1AlignmentScore > 0 || row.answeredCount > 0
+function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="mb-4">
+        <h2 className="text-2xl font-black tracking-tight text-gray-900">{title}</h2>
+        {subtitle ? <p className="mt-1 text-sm leading-6 text-gray-600">{subtitle}</p> : null}
+      </div>
+      {children}
+    </section>
   )
-  const comparableStudents = comparableRows.length
-
-  const avgStage1Alignment =
-    comparableStudents > 0
-      ? comparableRows.reduce((sum, row) => sum + row.stage1AlignmentScore, 0) /
-        comparableStudents
-      : 0
-
-  const avgPostOverallAccuracy =
-    comparableStudents > 0
-      ? comparableRows.reduce((sum, row) => sum + row.overallAccuracy, 0) /
-        comparableStudents
-      : 0
-
-  const avgPrePostDelta =
-    comparableStudents > 0
-      ? comparableRows.reduce((sum, row) => sum + row.prePostDelta, 0) /
-        comparableStudents
-      : 0
-
-  return {
-    totalStudents,
-    activeStudents,
-    completedStudents,
-    completionRate,
-    avgAccuracyCompleted,
-    avgAwarenessSecondsCompleted,
-    avgReadinessRetryCountCompleted,
-    avgAnsweredCoverage,
-    positiveShiftRate,
-    highRiskStudents,
-    avgStage1Alignment,
-    avgPostOverallAccuracy,
-    avgPrePostDelta,
-    comparableStudents,
-  }
 }
 
-function buildStageFunnel(rows: StudentRow[]): StageFunnel {
-  return {
-    inactive: rows.filter((row) => row.currentStageKey === 'inactive').length,
-    stage1: rows.filter((row) => row.currentStageKey === 'stage1').length,
-    awareness: rows.filter((row) => row.currentStageKey === 'awareness').length,
-    evidence: rows.filter((row) => row.currentStageKey === 'evidence').length,
-    done: rows.filter((row) => row.currentStageKey === 'done').length,
-  }
+function SummaryCard({ title, value, helper, note }: { title: string; value: string; helper?: string; note?: string }) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="text-sm font-semibold text-gray-500">{title}</div>
+      <div className="mt-2 text-4xl font-black tracking-tight text-gray-900">{value}</div>
+      {helper ? <div className="mt-2 text-xs leading-5 text-gray-500">{helper}</div> : null}
+      {note ? <div className="mt-1 text-xs leading-5 text-amber-700">{note}</div> : null}
+    </div>
+  )
 }
 
-function buildItemAccuracy(rows: StudentRow[]): ItemAccuracyRow[] {
-  const itemStats: Record<
-    string,
+function BarRow({ label, value, total, colorClass = 'bg-black' }: { label: string; value: number; total: number; colorClass?: string }) {
+  const width = total > 0 ? Math.max((value / total) * 100, value > 0 ? 4 : 0) : 0
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium text-gray-700">{label}</span>
+        <span className="text-gray-500">{value}</span>
+      </div>
+      <div className="h-3 rounded-full bg-gray-100">
+        <div className={`h-3 rounded-full ${colorClass}`} style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function capabilityCards(students: StudentRow[], sampleBases: SampleBases) {
+  const total = students.length
+  const stage1Ready = students.filter((s) => (s.stage1GroupCount ?? 0) > 0 && (s.stage1OverallReasonLength ?? 0) >= 8).length
+  const cueAwareness = students.filter((s) => (s.diagnosticFeatureCount ?? 0) > 0 && (s.possibleFeatureCount ?? 0) > 0).length
+  const evidenceStable = students.filter((s) => (s.evidenceCount ?? 0) > 0 && (s.evidenceAccuracy ?? 0) >= 0.5).length
+  const transferStable = students.filter((s) => (s.transferCount ?? 0) > 0 && (s.transferAccuracy ?? 0) >= 0.5).length
+  const structureShift = students.filter((s) => (s.structuralFeatureRate ?? 0) >= 0.6).length
+
+  return [
     {
-      animalName: string
-      correctPhylum: string
-      respondents: number
-      correct: number
-      wrongAnswers: Record<string, number>
-    }
-  > = {}
-
-  for (const student of rows) {
-    for (const item of student.resultRowsActual) {
-      if (!itemStats[item.animalName]) {
-        itemStats[item.animalName] = {
-          animalName: item.animalName,
-          correctPhylum: item.correctPhylum,
-          respondents: 0,
-          correct: 0,
-          wrongAnswers: {},
-        }
-      }
-
-      itemStats[item.animalName].respondents += 1
-
-      if (item.isCorrect) {
-        itemStats[item.animalName].correct += 1
-      } else {
-        itemStats[item.animalName].wrongAnswers[item.userAnswer] =
-          (itemStats[item.animalName].wrongAnswers[item.userAnswer] ?? 0) + 1
-      }
-    }
-  }
-
-  return Object.values(itemStats)
-    .map((item) => {
-      const topWrongAnswers = Object.entries(item.wrongAnswers)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([answer, count]) => ({ answer, count }))
-
-      return {
-        animalName: item.animalName,
-        correctPhylum: item.correctPhylum,
-        respondents: item.respondents,
-        correct: item.correct,
-        accuracy: item.respondents > 0 ? item.correct / item.respondents : 0,
-        topWrongAnswers,
-        interpretation:
-          topWrongAnswers.length > 0
-            ? getMisconceptionInterpretation(
-                item.animalName,
-                item.correctPhylum,
-                topWrongAnswers[0].answer
-              )
-            : '此題目前沒有明顯的共同迷思，可視為相對穩定的判定項目。',
-      }
-    })
-    .sort((a, b) => a.accuracy - b.accuracy)
+      title: '初步分類與理由化',
+      count: stage1Ready,
+      total,
+      note: '學生是否完成分組、群組理由與整體分類想法，代表是否願意把直覺分類說成可討論的判準。',
+    },
+    {
+      title: '關鍵／輔助線索辨識',
+      count: cueAwareness,
+      total,
+      note: '學生是否至少開始區分「較具診斷力的線索」與「不穩定的線索」。',
+    },
+    {
+      title: '帶提示判定穩定',
+      count: evidenceStable,
+      total: sampleBases.evidenceStudents,
+      note: `evidence 有效樣本 ${sampleBases.evidenceStudents}；學生在有鷹架支持時，是否能相對穩定地做出門別判定。`,
+    },
+    {
+      title: '遷移判定穩定',
+      count: transferStable,
+      total: sampleBases.transferStudents,
+      note: `transfer 有效樣本 ${sampleBases.transferStudents}；學生在移除提示卡後，是否仍能把規則套用到新生物。`,
+    },
+    {
+      title: '由表面走向結構',
+      count: structureShift,
+      total,
+      note: '結構線索比例 ≥ 60% 視為較明顯轉向結構判準。',
+    },
+  ]
 }
 
-function buildMisconceptionPatterns(itemAccuracy: ItemAccuracyRow[]): MisconceptionRow[] {
-  return itemAccuracy
-    .flatMap((item) =>
-      item.topWrongAnswers.map((wrong) => ({
-        animalName: item.animalName,
-        correctPhylum: item.correctPhylum,
-        wrongAnswer: wrong.answer,
-        count: wrong.count,
-        interpretation: getMisconceptionInterpretation(
-          item.animalName,
-          item.correctPhylum,
-          wrong.answer
-        ),
+function getQuestionAction(q: QuestionMetric) {
+  const accuracy = q.accuracy ?? 0
+  const duration = q.avgDurationSec ?? 0
+  const zoomRate = q.zoomUserRate ?? 0
+  const hcWrong = q.highConfidenceWrongRate ?? 0
+
+  if (accuracy <= 0.25 && hcWrong >= 0.3) {
+    return '高信心錯答偏高，適合用於概念衝突教學。'
+  }
+  if (accuracy <= 0.25 && duration >= 20) {
+    return '低正確率且平均耗時偏高，代表規則未建立，不只是粗心。'
+  }
+  if (accuracy <= 0.25 && duration < 8) {
+    return '低正確率但平均耗時很短，可能出現快速直覺判斷或低估題目難度。'
+  }
+  if (accuracy <= 0.5 && zoomRate >= 0.5) {
+    return '即使看圖，仍未判對，問題多半不在圖片大小，而在判準建立。'
+  }
+  if (accuracy >= 0.75) {
+    return '此題目前表現相對穩定，可作為對照題或示範題。'
+  }
+  return '此題適合搭配常見錯答與誤用特徵一起回教。'
+}
+
+function getFeatureTeachingNote(feature: FeatureMetric) {
+  if (feature.cueType === '表面線索' && (feature.wrongSelectionRate ?? 0) >= 0.6) {
+    return '這是高風險表面線索，學生常勾選它卻難以做對，值得教師直接點名處理。'
+  }
+  if (feature.cueType === '結構線索' && (feature.correctRateWhenSelected ?? 0) >= 0.6) {
+    return '學生開始使用此結構線索，但其診斷力是否穩定，仍要對照正確率觀察。'
+  }
+  return '可再結合學生理由文字，判斷此特徵是被正確使用，還是被誤當成關鍵判準。'
+}
+
+function diagnoseStudent(student: StudentRow) {
+  const reasons: string[] = []
+  if (!student.isCompleted) reasons.push('尚未完成全流程')
+  if ((student.transferCount ?? 0) > 0 && (student.transferAccuracy ?? 1) < 0.34) reasons.push('遷移判定偏弱')
+  if ((student.sdi ?? 0) >= 0.25) reasons.push('移除提示後落差大')
+  if ((student.structuralFeatureRate ?? 1) < 0.4) reasons.push('仍偏表面線索')
+  if ((student.avgTransferDurationSec ?? 0) > 180) reasons.push('作答耗時異常偏長')
+  if ((student.zoomOpenCount ?? 0) > 0 && (student.transferAccuracy ?? 0) < 0.5) reasons.push('有看圖但未形成穩定判準')
+  if (reasons.length === 0) reasons.push('目前未見明顯高風險訊號')
+
+  const question = !student.isCompleted
+    ? '先確認學生卡在哪一階段，優先排除流程或理解門檻。'
+    : (student.sdi ?? 0) >= 0.25
+      ? '請比較他在 evidence 與 transfer 哪一題開始失準，追問「有提示時你怎麼做，沒提示時又怎麼做？」'
+      : '可請學生口頭說明其判準，檢查是否真的能用結構線索說理。'
+
+  return { reasons, question }
+}
+
+function buildClassDiagnosis(data: DashboardResponse) {
+  const { summary, sampleBases } = data
+  if (summary.totalStudents === 0) {
+    return {
+      title: '目前沒有可解讀資料',
+      severity: 'info' as const,
+      body: '目前篩選條件下沒有學生資料，請先放寬篩選或確認資料是否已送入平台。',
+    }
+  }
+  if ((summary.completionRate ?? 0) < 0.2) {
+    return {
+      title: '目前最優先不是看正確率，而是先讓更多學生走完整個流程',
+      severity: 'strong' as const,
+      body: `目前共 ${summary.totalStudents} 位學生，但完成率僅 ${pct(summary.completionRate)}。在流程尚未走完前，低正確率不宜直接解讀為概念不足。建議先處理卡在第 2 或第 3 階段的學生。`,
+    }
+  }
+  if (sampleBases.transferStudents < 5) {
+    return {
+      title: '目前可先看早期訊號，但尚不足以下全班定論',
+      severity: 'warn' as const,
+      body: `目前 transfer 有效樣本僅 ${sampleBases.transferStudents} 人。可以先看哪些題目與特徵開始出現共同錯誤，但暫時不宜把 transfer 正確率當成全班結論。`,
+    }
+  }
+  if ((summary.sdi ?? 0) >= 0.2) {
+    return {
+      title: '本班目前最像是「有鷹架會做，移除提示後失準」',
+      severity: 'warn' as const,
+      body: `evidence 正確率 ${pct(summary.evidenceAccuracy)}，transfer 正確率 ${pct(summary.transferAccuracy)}，SDI ${num(summary.sdi, 2)}。這代表學生已開始抓到規則，但還沒有穩定遷移。`,
+    }
+  }
+  return {
+    title: '本班目前已開始形成穩定判準，可進一步看共同迷思與個別差異',
+    severity: 'info' as const,
+    body: `完成率 ${pct(summary.completionRate)}，evidence 正確率 ${pct(summary.evidenceAccuracy)}，transfer 正確率 ${pct(summary.transferAccuracy)}。目前更值得往下看的是哪幾題與哪些特徵造成剩餘錯誤。`,
+  }
+}
+
+function useDecisionPanels(data: DashboardResponse | null) {
+  return useMemo(() => {
+    if (!data) return null
+
+    const classDiagnosis = buildClassDiagnosis(data)
+
+    const interventionStudents = data.highRiskStudents.slice(0, 5).map((student) => ({
+      student,
+      ...diagnoseStudent(student),
+    }))
+
+    const reteachQuestions = data.questionMetrics.slice(0, 5).map((q) => ({
+      ...q,
+      teachingAction: getQuestionAction(q),
+    }))
+
+    const clarifyFeatures = data.featureMetrics
+      .filter((f) => f.selectedCount >= 2)
+      .sort((a, b) => {
+        const aScore = ((a.wrongSelectionRate ?? 0) * 100) + (a.cueType === '表面線索' ? 20 : 0)
+        const bScore = ((b.wrongSelectionRate ?? 0) * 100) + (b.cueType === '表面線索' ? 20 : 0)
+        return bScore - aScore
+      })
+      .slice(0, 5)
+      .map((feature) => ({
+        ...feature,
+        teachingNote: getFeatureTeachingNote(feature),
       }))
-    )
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 12)
+
+    return { classDiagnosis, interventionStudents, reteachQuestions, clarifyFeatures }
+  }, [data])
 }
 
-function buildFeatureUsage(rows: StudentRow[]): FeatureUsageRow[] {
-  const featureStats: Record<string, { diagnostic: number; possible: number }> = {}
-
-  for (const student of rows) {
-    for (const feature of student.diagnosticFeatures) {
-      if (!featureStats[feature]) featureStats[feature] = { diagnostic: 0, possible: 0 }
-      featureStats[feature].diagnostic += 1
-    }
-
-    for (const feature of student.possibleFeatures) {
-      if (!featureStats[feature]) featureStats[feature] = { diagnostic: 0, possible: 0 }
-      featureStats[feature].possible += 1
-    }
-  }
-
-  return Object.entries(featureStats)
-    .map(([feature, counts]) => ({
-      feature,
-      featureType: getFeatureType(feature),
-      diagnostic: counts.diagnostic,
-      possible: counts.possible,
-      total: counts.diagnostic + counts.possible,
-      interpretation: getFeatureInterpretation(feature, counts.diagnostic, counts.possible),
-    }))
-    .sort((a, b) => b.total - a.total)
-}
-
-function buildClassSummary(rows: StudentRow[]): ClassSummaryRow[] {
-  const classMap = new Map<
-    string,
-    {
-      key: string
-      schoolCode: string
-      grade: string
-      className: string
-      studentCount: number
-      completedCount: number
-      accuracySumCompleted: number
-      awarenessSum: number
-      retrySum: number
-      alignmentSum: number
-      prePostDeltaSum: number
-      comparableCount: number
-    }
-  >()
-
-  for (const row of rows) {
-    const key = [row.schoolCode, row.grade || '未填年級', row.className || '未填班級'].join('|')
-
-    if (!classMap.has(key)) {
-      classMap.set(key, {
-        key,
-        schoolCode: row.schoolCode,
-        grade: row.grade || '未填年級',
-        className: row.className || '未填班級',
-        studentCount: 0,
-        completedCount: 0,
-        accuracySumCompleted: 0,
-        awarenessSum: 0,
-        retrySum: 0,
-        alignmentSum: 0,
-        prePostDeltaSum: 0,
-        comparableCount: 0,
-      })
-    }
-
-    const target = classMap.get(key)!
-    target.studentCount += 1
-    target.awarenessSum += row.awarenessSecondsSpent
-    target.retrySum += row.readinessRetryCount
-
-    if (row.completed) {
-      target.completedCount += 1
-      target.accuracySumCompleted += row.accuracy
-    }
-
-    if (row.stage1AlignmentScore > 0 || row.answeredCount > 0) {
-      target.alignmentSum += row.stage1AlignmentScore
-      target.prePostDeltaSum += row.prePostDelta
-      target.comparableCount += 1
-    }
-  }
-
-  return Array.from(classMap.values())
-    .map((item) => ({
-      key: item.key,
-      schoolCode: item.schoolCode,
-      grade: item.grade,
-      className: item.className,
-      studentCount: item.studentCount,
-      completedCount: item.completedCount,
-      completionRate: item.studentCount > 0 ? item.completedCount / item.studentCount : 0,
-      avgAccuracyCompleted:
-        item.completedCount > 0 ? item.accuracySumCompleted / item.completedCount : 0,
-      avgAwarenessSeconds:
-        item.studentCount > 0 ? item.awarenessSum / item.studentCount : 0,
-      avgReadinessRetryCount:
-        item.studentCount > 0 ? item.retrySum / item.studentCount : 0,
-      avgStage1Alignment:
-        item.comparableCount > 0 ? item.alignmentSum / item.comparableCount : 0,
-      avgPrePostDelta:
-        item.comparableCount > 0 ? item.prePostDeltaSum / item.comparableCount : 0,
-    }))
-    .sort((a, b) => {
-      const school = a.schoolCode.localeCompare(b.schoolCode, 'zh-Hant')
-      if (school !== 0) return school
-      const grade = a.grade.localeCompare(b.grade, 'zh-Hant')
-      if (grade !== 0) return grade
-      return a.className.localeCompare(b.className, 'zh-Hant')
-    })
-}
-
-function buildCapabilityIndicators(rows: StudentRow[]): CapabilityIndicator[] {
-  const totalStudents = rows.length
-  const stage1QualifiedCount = rows.filter((row) => row.stage1Complete).length
-  const ruleConstructionCount = rows.filter(
-    (row) =>
-      row.diagnosticFeatures.length > 0 &&
-      row.possibleFeatures.length > 0 &&
-      row.stage2CueOrientation === '結構線索為主'
-  ).length
-  const evidenceJudgementCount = rows.filter((row) => row.completed).length
-  const highQualityJudgementCount = rows.filter(
-    (row) => row.completed && row.accuracy >= 0.75
-  ).length
-  const positiveShiftCount = rows.filter((row) =>
-    ['由表面轉向結構', '由混合走向規則化', '在第二階段建立結構線索'].includes(
-      row.changeCategory
-    )
-  ).length
-
-  return [
-    {
-      dimension: '初步分類與理由化',
-      count: stage1QualifiedCount,
-      total: totalStudents,
-      rate: totalStudents > 0 ? stage1QualifiedCount / totalStudents : 0,
-      interpretation:
-        '此指標看的是學生能否完成分組、填寫群組理由與整體分類想法，反映其是否願意把直觀分類說成可討論的判準。',
-    },
-    {
-      dimension: '關鍵／輔助線索辨識',
-      count: ruleConstructionCount,
-      total: totalStudents,
-      rate: totalStudents > 0 ? ruleConstructionCount / totalStudents : 0,
-      interpretation:
-        '此指標反映學生是否開始把結構線索提升為關鍵依據，並把表面線索降到輔助位置，這是分類能力從直覺走向規則化的核心。',
-    },
-    {
-      dimension: '證據式門別判定',
-      count: evidenceJudgementCount,
-      total: totalStudents,
-      rate: totalStudents > 0 ? evidenceJudgementCount / totalStudents : 0,
-      interpretation:
-        '此指標反映學生是否完成第三階段的帶提示門別判定，代表其是否能把前面建立的規則真正套用到具體生物判斷。',
-    },
-    {
-      dimension: '高品質判定表現',
-      count: highQualityJudgementCount,
-      total: evidenceJudgementCount,
-      rate:
-        evidenceJudgementCount > 0
-          ? highQualityJudgementCount / evidenceJudgementCount
-          : 0,
-      interpretation:
-        '此指標看的是完成後測的學生中，有多少人已達到較穩定的正確率，代表規則化判斷是否真正內化。',
-    },
-    {
-      dimension: '由表面走向結構',
-      count: positiveShiftCount,
-      total: totalStudents,
-      rate: totalStudents > 0 ? positiveShiftCount / totalStudents : 0,
-      interpretation:
-        '此指標聚焦學生是否從原本較依賴外觀、生活環境等表面線索，轉向採用刺絲胞、外套膜、體節、外骨骼、管足等結構線索。',
-    },
-  ]
-}
-
-function buildInsightCards(params: {
-  totalRecords: number
-  rows: StudentRow[]
-  summary: Summary
-  classSummary: ClassSummaryRow[]
-  misconceptionPatterns: MisconceptionRow[]
-}): InsightCard[] {
-  const { totalRecords, rows, summary, classSummary, misconceptionPatterns } = params
-
-  const topMisconception = misconceptionPatterns[0]
-  const comparableRows = rows.filter(
-    (row) => row.stage1AlignmentScore > 0 || row.answeredCount > 0
-  )
-
-  const positiveGrowthCount = comparableRows.filter((row) => row.prePostDelta > 0.1).length
-  const positiveGrowthRate =
-    comparableRows.length > 0 ? positiveGrowthCount / comparableRows.length : 0
-
-  const highestClass = [...classSummary]
-    .filter((row) => row.completedCount > 0)
-    .sort((a, b) => b.avgAccuracyCompleted - a.avgAccuracyCompleted)[0]
-
-  const lowestClass = [...classSummary]
-    .filter((row) => row.completedCount > 0)
-    .sort((a, b) => a.avgAccuracyCompleted - b.avgAccuracyCompleted)[0]
-
-  return [
-    {
-      title: '完成率是解讀成效的第一道門檻',
-      evidence: `目前篩選範圍共有 ${summary.totalStudents} 位有效學生（原始紀錄 ${totalRecords} 筆），其中 ${summary.completedStudents} 位完成完整判定，完成率 ${pct(summary.completionRate)}。`,
-      interpretation:
-        summary.completionRate < 0.7
-          ? '若完成率偏低，教師不能直接把低正確率解讀為概念不足，因為不少學生可能只是尚未走完整個歷程。'
-          : '完成率已達一定水準，後續的正確率與迷思分析會比較接近真實的概念表現。',
-      teachingSuggestion:
-        '建議先看停留第2或第3階段的學生名單，優先支援流程卡關者，再解讀題目表現。',
-    },
-    {
-      title: '平台是否促成「前後改變」',
-      evidence: `可比較前後表現的學生共有 ${summary.comparableStudents} 位；第一階段平均初始分類對齊度為 ${pct(summary.avgStage1Alignment)}，後續整體判定表現為 ${pct(summary.avgPostOverallAccuracy)}，平均差值 ${summary.avgPrePostDelta >= 0 ? '+' : ''}${pct(summary.avgPrePostDelta)}。`,
-      interpretation:
-        summary.avgPrePostDelta > 0.1
-          ? '整體來看，學生後續門別判定表現高於初始直觀分組，顯示平台不只是讓學生拖圖片，而是逐步把分類活動轉化為較有規則的判定。'
-          : '若平均差值不明顯，代表部分學生雖能做初始分組，但還未穩定把規則套用到門別判定；教師需要回到第二階段的線索層級教學。',
-      teachingSuggestion:
-        '請特別關注第一階段對齊度不低、但第三階段表現沒有跟上來的學生，這類學生常見的問題是「能大致分，但說不出規則」。',
-    },
-    {
-      title: '分類能力的關鍵，不是背名稱，而是線索層級的改變',
-      evidence: `${positiveGrowthCount} 位學生在前後比較中呈現明顯正向成長，占可比較學生的 ${pct(positiveGrowthRate)}；整體有 ${pct(summary.positiveShiftRate)} 的學生在第二階段呈現由表面走向結構的線索改變。`,
-      interpretation:
-        summary.positiveShiftRate < 0.5
-          ? '若這個比例偏低，表示不少學生仍停留在「像什麼、住哪裡、有沒有殼」的直觀分類。'
-          : '若這個比例偏高，表示平台已幫助不少學生把線索從直觀外觀轉向結構性判準。',
-      teachingSuggestion:
-        '回教時可把學生常用的表面線索直接拿出來討論：哪些可以參考，哪些不能單獨決定門別。',
-    },
-    {
-      title: '迷思概念最值得追的是「穩定的錯誤，不是零星失誤」',
-      evidence: topMisconception
-        ? `${topMisconception.animalName} 最常被誤判為 ${topMisconception.wrongAnswer}，共 ${topMisconception.count} 次。`
-        : '目前尚未形成明顯的共同迷思。',
-      interpretation: topMisconception
-        ? topMisconception.interpretation
-        : '目前班級的錯誤較分散，適合回到學生個別作答紀錄做診斷。',
-      teachingSuggestion:
-        '請優先針對高頻錯誤生物做全班回教，因為那通常代表共同的判斷規則尚未建立穩定。',
-    },
-    {
-      title: '高風險學生值得教師優先關注',
-      evidence: `目前共有 ${summary.highRiskStudents} 位高風險學生。`,
-      interpretation:
-        summary.highRiskStudents >= Math.max(3, Math.ceil(summary.totalStudents * 0.2))
-          ? '高風險學生比例偏高時，通常代表不只是個別差異，而可能是關卡語意、操作流暢度或規則說明需要調整。'
-          : '高風險學生數量有限時，較可能屬於個別支持需求，可用學生摘要表做精準追蹤。',
-      teachingSuggestion:
-        '建議優先查看同時具備「尚未完成」「第二階段重試偏多」「仍偏表面線索」標記的學生。',
-    },
-    {
-      title: '班級差異可作為教學調整的依據',
-      evidence:
-        highestClass && lowestClass
-          ? `完成後測平均正確率最高的班級為 ${highestClass.schoolCode} ${highestClass.grade} ${highestClass.className}（${pct(highestClass.avgAccuracyCompleted)}）；最低的班級為 ${lowestClass.schoolCode} ${lowestClass.grade} ${lowestClass.className}（${pct(lowestClass.avgAccuracyCompleted)}）。`
-          : '目前班級比較資料不足。',
-      interpretation:
-        highestClass && lowestClass
-          ? '同一平台在不同班級的表現差異，常反映前導教學、教師口語提醒、或學生對線索層級的掌握差異。'
-          : '請累積更多班級資料後再進行班級層級比較。',
-      teachingSuggestion:
-        '建議比較高表現班與低表現班在「第二階段特徵使用分布」與「迷思概念」上的差異，而不是只看平均分數。',
-    },
-  ]
-}
-
-export default function TeacherPage() {
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+export default function TeacherDecisionPage() {
+  const [filters, setFilters] = useState<FiltersState>(INITIAL_FILTERS)
+  const [data, setData] = useState<DashboardResponse | null>(null)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [report, setReport] = useState<ReportResponse | null>(null)
 
-  const [keyword, setKeyword] = useState('')
-  const [schoolFilter, setSchoolFilter] = useState('')
-  const [gradeFilter, setGradeFilter] = useState('')
-  const [classFilter, setClassFilter] = useState('')
-  const [studentFilter, setStudentFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [riskFilter, setRiskFilter] = useState('')
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams()
+    if (filters.schoolCode) params.set('schoolCode', filters.schoolCode)
+    if (filters.grade) params.set('grade', filters.grade)
+    if (filters.className) params.set('className', filters.className)
+    if (filters.participantCode) params.set('participantCode', filters.participantCode)
+    if (filters.currentStage) params.set('currentStage', filters.currentStage)
+    if (filters.completedOnly) params.set('completedOnly', 'true')
+    if (filters.riskOnly) params.set('riskOnly', 'true')
+    return params.toString()
+  }, [filters])
 
-  async function loadReport() {
-    setLoading(true)
-    setError('')
-
-    try {
-      const response = await fetch('/api/teacher-report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      })
-
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result?.error || '讀取失敗')
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      setLoading(true)
+      setError('')
+      try {
+        const response = await fetch(`/api/teacher-dashboard?${queryString}`, { cache: 'no-store' })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result?.error || '讀取教師分析頁資料失敗')
+        if (!cancelled) setData(result)
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : '未知錯誤')
+          setData(null)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-
-      setReport(result)
-    } catch (error: any) {
-      setError(error.message || '讀取失敗')
-    } finally {
-      setLoading(false)
     }
-  }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [queryString])
 
-  const filteredGradeOptions = useMemo(() => {
-    if (!report) return []
-    const rows = report.studentRows.filter((row) => {
-      return !schoolFilter || row.schoolCode === schoolFilter
-    })
-    return Array.from(new Set(rows.map((row) => row.grade || '未填年級'))).sort((a, b) =>
-      a.localeCompare(b, 'zh-Hant')
-    )
-  }, [report, schoolFilter])
-
-  const filteredClassOptions = useMemo(() => {
-    if (!report) return []
-    const rows = report.studentRows.filter((row) => {
-      const schoolOk = !schoolFilter || row.schoolCode === schoolFilter
-      const gradeOk = !gradeFilter || (row.grade || '未填年級') === gradeFilter
-      return schoolOk && gradeOk
-    })
-    return Array.from(new Set(rows.map((row) => row.className || '未填班級'))).sort((a, b) =>
-      a.localeCompare(b, 'zh-Hant')
-    )
-  }, [report, schoolFilter, gradeFilter])
-
-  const filteredStudentOptions = useMemo(() => {
-    if (!report) return []
-    const rows = report.studentRows.filter((row) => {
-      const schoolOk = !schoolFilter || row.schoolCode === schoolFilter
-      const gradeOk = !gradeFilter || (row.grade || '未填年級') === gradeFilter
-      const classOk = !classFilter || (row.className || '未填班級') === classFilter
-      return schoolOk && gradeOk && classOk
-    })
-
-    return rows.map((row) => ({
-      participantCode: row.participantCode,
-      label: `${row.schoolCode}｜${row.grade || '未填年級'}年級 ${row.className || '未填班級'}班 ${row.seatNo || '—'}號｜${row.maskedName}`,
-    }))
-  }, [report, schoolFilter, gradeFilter, classFilter])
-
-  const filteredStudents = useMemo(() => {
-    if (!report) return []
-
-    const keywordNormalized = keyword.trim().toLowerCase()
-
-    return report.studentRows.filter((row) => {
-      const keywordOk =
-        !keywordNormalized ||
-        [
-          row.schoolCode,
-          row.grade,
-          row.className,
-          row.seatNo,
-          row.maskedName,
-          row.participantCode,
-          row.statusLabel,
-          row.changeCategory,
-          row.changeNarrative,
-          row.riskFlags.join(' '),
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(keywordNormalized)
-
-      const schoolOk = !schoolFilter || row.schoolCode === schoolFilter
-      const gradeOk = !gradeFilter || (row.grade || '未填年級') === gradeFilter
-      const classOk = !classFilter || (row.className || '未填班級') === classFilter
-      const studentOk = !studentFilter || row.participantCode === studentFilter
-      const statusOk = !statusFilter || row.statusLabel === statusFilter
-      const riskOk = !riskFilter || row.riskLevel === riskFilter
-
-      return keywordOk && schoolOk && gradeOk && classOk && studentOk && statusOk && riskOk
-    })
-  }, [
-    report,
-    keyword,
-    schoolFilter,
-    gradeFilter,
-    classFilter,
-    studentFilter,
-    statusFilter,
-    riskFilter,
-  ])
-
-  const summary = useMemo(() => buildSummary(filteredStudents), [filteredStudents])
-  const stageFunnel = useMemo(() => buildStageFunnel(filteredStudents), [filteredStudents])
-  const itemAccuracy = useMemo(() => buildItemAccuracy(filteredStudents), [filteredStudents])
-  const misconceptionPatterns = useMemo(
-    () => buildMisconceptionPatterns(itemAccuracy),
-    [itemAccuracy]
-  )
-  const featureUsage = useMemo(() => buildFeatureUsage(filteredStudents), [filteredStudents])
-  const classSummary = useMemo(() => buildClassSummary(filteredStudents), [filteredStudents])
-  const capabilityIndicators = useMemo(
-    () => buildCapabilityIndicators(filteredStudents),
-    [filteredStudents]
-  )
-  const insightCards = useMemo(
-    () =>
-      buildInsightCards({
-        totalRecords: report?.totalRecords ?? 0,
-        rows: filteredStudents,
-        summary,
-        classSummary,
-        misconceptionPatterns,
-      }),
-    [report?.totalRecords, filteredStudents, summary, classSummary, misconceptionPatterns]
-  )
-
-  const filteredRiskSummary = useMemo(() => {
-    const high = filteredStudents.filter((row) => row.riskLevel === 'high').length
-    const medium = filteredStudents.filter((row) => row.riskLevel === 'medium').length
-    const low = filteredStudents.filter((row) => row.riskLevel === 'low').length
-    return { high, medium, low }
-  }, [filteredStudents])
+  const decisions = useDecisionPanels(data)
+  const capability = useMemo(() => (data ? capabilityCards(data.studentRows, data.sampleBases) : []), [data])
 
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8 md:px-6">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <section className="rounded-2xl border border-gray-200 bg-white p-6">
-          <h1 className="text-3xl font-black text-gray-900">教師端分析頁</h1>
-          <p className="mt-2 text-sm leading-6 text-gray-600">
-            這一版不只呈現成績，而是把學生的學習歷程拆成「是否完成」「迷思概念」「線索層級改變」「前後變化」與「平台欲培養的分類能力」來看。
-            建議先選學校與班級，再看分析結果，會比全平台混算更有教學意義。
-          </p>
+    <main className="min-h-screen bg-gray-50 px-4 py-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-4xl">
+              <h1 className="text-3xl font-black tracking-tight text-gray-900">Sci-Flipper 教師形成性診斷頁（決策版）</h1>
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                這一版先保留舊版 teacher 的教學解釋骨架，再把 item/event logs 接回來。重點不是看數字漂不漂亮，而是先回答四個教師最在意的問題：
+              </p>
+              <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6 text-gray-700">
+                <li>學生目前卡在哪一階段？</li>
+                <li>學生是概念未建立，還是有鷹架會做、沒提示就失準？</li>
+                <li>學生用了哪些判準？偏結構線索還是表面線索？</li>
+                <li>哪一題最值得重教、哪一類學生要先介入？</li>
+              </ol>
+            </div>
+            <div className="rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+              <div>目前篩選後學生數：<span className="font-bold text-gray-900">{data?.summary.totalStudents ?? '—'}</span></div>
+              <div>learning_records：{data?.counts.records ?? '—'}｜item_logs：{data?.counts.itemLogs ?? '—'}｜event_logs：{data?.counts.eventLogs ?? '—'}</div>
+              <div className="mt-2">evidence 有效樣本：{data?.sampleBases.evidenceStudents ?? '—'} 人／{data?.sampleBases.evidenceItems ?? '—'} 題</div>
+              <div>transfer 有效樣本：{data?.sampleBases.transferStudents ?? '—'} 人／{data?.sampleBases.transferItems ?? '—'} 題</div>
+            </div>
+          </div>
+        </div>
 
-          <div className="mt-4 flex flex-col gap-3 md:flex-row">
+        <Section title="篩選條件" subtitle="先縮小範圍，再看班級整體與個別學生。這是教學決策頁，不是排行榜。">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <select
+              value={filters.schoolCode}
+              onChange={(e) => setFilters((prev) => ({ ...prev, schoolCode: e.target.value, className: '' }))}
+              className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="">全部學校</option>
+              {data?.filters.schoolCodes.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+            <select
+              value={filters.grade}
+              onChange={(e) => setFilters((prev) => ({ ...prev, grade: e.target.value }))}
+              className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="">全部年級</option>
+              {data?.filters.grades.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+            <select
+              value={filters.className}
+              onChange={(e) => setFilters((prev) => ({ ...prev, className: e.target.value }))}
+              className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="">全部班級</option>
+              {data?.filters.classNames.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+            <select
+              value={filters.currentStage}
+              onChange={(e) => setFilters((prev) => ({ ...prev, currentStage: e.target.value }))}
+              className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="">全部階段</option>
+              {data?.filters.stages.map((value) => (
+                <option key={value} value={value}>{stageLabel(value)}</option>
+              ))}
+            </select>
             <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="教師密碼"
-              className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm md:max-w-sm"
+              value={filters.participantCode}
+              onChange={(e) => setFilters((prev) => ({ ...prev, participantCode: e.target.value }))}
+              placeholder="搜尋 participant_code"
+              className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
             />
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={filters.completedOnly} onChange={(e) => setFilters((prev) => ({ ...prev, completedOnly: e.target.checked }))} />
+                只看已完成
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={filters.riskOnly} onChange={(e) => setFilters((prev) => ({ ...prev, riskOnly: e.target.checked }))} />
+                只看高風險學生
+              </label>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
             <button
               type="button"
-              onClick={loadReport}
-              disabled={loading || !password}
-              className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+              onClick={() => setFilters(INITIAL_FILTERS)}
+              className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
             >
-              {loading ? '載入中…' : '載入報表'}
+              清除篩選
             </button>
           </div>
+        </Section>
 
-          {error ? (
-            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
-            </div>
-          ) : null}
-        </section>
-
-        {report ? (
+        {loading ? (
+          <div className="rounded-3xl border border-gray-200 bg-white p-10 text-center text-gray-600 shadow-sm">資料讀取中…</div>
+        ) : error ? (
+          <div className="rounded-3xl border border-red-200 bg-red-50 p-10 text-center text-red-700 shadow-sm">{error}</div>
+        ) : data && decisions ? (
           <>
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <div className="flex flex-col gap-4">
-                <div>
-                  <h2 className="text-2xl font-black text-gray-900">分析範圍篩選</h2>
-                  <p className="mt-2 text-sm leading-6 text-gray-600">
-                    教師端建議先界定分析範圍，再看結果。篩選後，下方所有統計、迷思概念、前後改變與學生摘要都會重新計算。
-                  </p>
+            <Section title="先看這四件事" subtitle="教師進來第一眼應先看到的是教學行動，而不是一排數字。">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className={`rounded-2xl border p-4 ${severityTone(decisions.classDiagnosis.severity)}`}>
+                  <div className="text-lg font-black text-gray-900">班級一句話診斷</div>
+                  <div className="mt-3 text-sm font-semibold text-gray-900">{decisions.classDiagnosis.title}</div>
+                  <div className="mt-2 text-sm leading-6 text-gray-700">{decisions.classDiagnosis.body}</div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
-                  <input
-                    value={keyword}
-                    onChange={(e) => setKeyword(e.target.value)}
-                    placeholder="搜尋學校 / 姓名 / 座號 / participantCode"
-                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm xl:col-span-2"
-                  />
-
-                  <select
-                    value={schoolFilter}
-                    onChange={(e) => setSchoolFilter(e.target.value)}
-                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm"
-                  >
-                    <option value="">全部學校</option>
-                    {report.filterOptions.schools.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={gradeFilter}
-                    onChange={(e) => setGradeFilter(e.target.value)}
-                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm"
-                  >
-                    <option value="">全部年級</option>
-                    {filteredGradeOptions.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={classFilter}
-                    onChange={(e) => setClassFilter(e.target.value)}
-                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm"
-                  >
-                    <option value="">全部班級</option>
-                    {filteredClassOptions.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={studentFilter}
-                    onChange={(e) => setStudentFilter(e.target.value)}
-                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm"
-                  >
-                    <option value="">全部學生</option>
-                    {filteredStudentOptions.map((item) => (
-                      <option key={item.participantCode} value={item.participantCode}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm"
-                  >
-                    <option value="">全部狀態</option>
-                    {Array.from(new Set(report.studentRows.map((row) => row.statusLabel))).map(
-                      (item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      )
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-lg font-black text-gray-900">立即介入學生（前 5 位）</div>
+                  <div className="mt-2 text-sm leading-6 text-gray-600">不是最低分排名，而是最值得教師先點名支持的學生。</div>
+                  <div className="mt-3 space-y-3">
+                    {decisions.interventionStudents.length === 0 ? (
+                      <div className="text-sm text-gray-500">目前沒有高風險學生。</div>
+                    ) : (
+                      decisions.interventionStudents.map(({ student, reasons, question }) => (
+                        <div key={student.participantCode} className="rounded-2xl border border-gray-200 bg-white p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-bold text-gray-900">
+                              {student.maskedName || '未具名'}
+                              <span className="ml-2 text-sm font-normal text-gray-500">{student.participantCode}</span>
+                            </div>
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${riskTone(student.riskLevel)}`}>{student.riskLevel}</span>
+                          </div>
+                          <div className="mt-2 text-sm leading-6 text-gray-700">風險原因：{reasons.join('、')}</div>
+                          <div className="mt-1 text-sm leading-6 text-gray-700">教師第一句可先問：{question}</div>
+                        </div>
+                      ))
                     )}
-                  </select>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-3">
-                  <select
-                    value={riskFilter}
-                    onChange={(e) => setRiskFilter(e.target.value)}
-                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm"
-                  >
-                    <option value="">全部風險等級</option>
-                    <option value="high">高風險</option>
-                    <option value="medium">中風險</option>
-                    <option value="low">低風險</option>
-                  </select>
-
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-700">
-                    篩選後學生數：<span className="font-bold text-gray-900">{filteredStudents.length}</span>
-                  </div>
-
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-700">
-                    風險分布：
-                    <span className="ml-2 text-red-700">高 {filteredRiskSummary.high}</span>
-                    <span className="ml-2 text-amber-700">中 {filteredRiskSummary.medium}</span>
-                    <span className="ml-2 text-green-700">低 {filteredRiskSummary.low}</span>
                   </div>
                 </div>
-              </div>
-            </section>
 
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">原始紀錄數</div>
-                <div className="mt-2 text-3xl font-black">{report.totalRecords}</div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">有效學生數</div>
-                <div className="mt-2 text-3xl font-black">{summary.totalStudents}</div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">已開始歷程</div>
-                <div className="mt-2 text-3xl font-black">{summary.activeStudents}</div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">完整完成</div>
-                <div className="mt-2 text-3xl font-black">{summary.completedStudents}</div>
-                <div className="mt-1 text-xs text-gray-500">完成率 {pct(summary.completionRate)}</div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">完成者平均正確率</div>
-                <div className="mt-2 text-3xl font-black">{pct(summary.avgAccuracyCompleted)}</div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">高風險學生</div>
-                <div className="mt-2 text-3xl font-black">{summary.highRiskStudents}</div>
-              </div>
-            </section>
-
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">完成者第二階段平均秒數</div>
-                <div className="mt-2 text-3xl font-black">
-                  {summary.avgAwarenessSecondsCompleted.toFixed(1)}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">完成者平均重試次數</div>
-                <div className="mt-2 text-3xl font-black">
-                  {summary.avgReadinessRetryCountCompleted.toFixed(2)}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">平均作答覆蓋率</div>
-                <div className="mt-2 text-3xl font-black">{pct(summary.avgAnsweredCoverage)}</div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">由表面走向結構</div>
-                <div className="mt-2 text-3xl font-black">{pct(summary.positiveShiftRate)}</div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">可比較前後變化學生</div>
-                <div className="mt-2 text-3xl font-black">{summary.comparableStudents}</div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="text-2xl font-black text-gray-900">教師詮釋重點</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                這一區不是原始數字堆疊，而是把資料轉成教師較容易採取行動的解讀：先看完成率，再看前後改變與線索層級改變，再看共同迷思，最後定位高風險學生。
-              </p>
-
-              <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                {insightCards.map((card) => (
-                  <div key={card.title} className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
-                    <div className="text-lg font-black text-gray-900">{card.title}</div>
-                    <div className="mt-3 text-sm leading-6 text-gray-700">
-                      <div>
-                        <span className="font-semibold">證據：</span>
-                        {card.evidence}
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-lg font-black text-gray-900">全班最值得重教的題目</div>
+                  <div className="mt-2 text-sm leading-6 text-gray-600">優先不是最低分題，而是兼看正確率、耗時、信心與 zoom 後仍失準的題目。</div>
+                  <div className="mt-3 space-y-3">
+                    {decisions.reteachQuestions.map((q) => (
+                      <div key={q.key} className="rounded-2xl border border-gray-200 bg-white p-4">
+                        <div className="font-bold text-gray-900">{q.stage}/{q.questionId} {q.animalName ?? ''}</div>
+                        <div className="mt-2 grid gap-2 text-sm text-gray-700 sm:grid-cols-2 lg:grid-cols-4">
+                          <div>作答人次：{q.respondents}</div>
+                          <div>正確率：{pct(q.accuracy)}</div>
+                          <div>平均秒數：{num(q.avgDurationSec, 1)}</div>
+                          <div>平均信心：{num(q.avgConfidence, 1)}</div>
+                        </div>
+                        <div className="mt-2 text-sm leading-6 text-gray-700">常見錯答：{q.topWrongAnswers.length ? q.topWrongAnswers.join('、') : '—'}</div>
+                        <div className="mt-1 text-sm leading-6 text-gray-700">常見誤用特徵：{q.topWrongFeatures.length ? q.topWrongFeatures.join('、') : '—'}</div>
+                        <div className="mt-2 text-sm leading-6 font-medium text-gray-900">教學建議：{q.teachingAction}</div>
                       </div>
-                      <div className="mt-2">
-                        <span className="font-semibold">詮釋：</span>
-                        {card.interpretation}
-                      </div>
-                      <div className="mt-2">
-                        <span className="font-semibold">教學建議：</span>
-                        {card.teachingSuggestion}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="text-2xl font-black text-gray-900">平台欲培養的分類能力指標</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                這些指標不是傳統分數，而是對應平台設計目標：從直觀分組、到區分關鍵與輔助線索、再到以證據支持門別判定。
-              </p>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                {capabilityIndicators.map((item) => (
-                  <div key={item.dimension} className="rounded-2xl border border-gray-200 p-4">
-                    <div className="text-sm font-semibold text-gray-500">{item.dimension}</div>
-                    <div className="mt-2 text-2xl font-black text-gray-900">
-                      {item.count} / {item.total}
-                    </div>
-                    <div className="mt-1 text-sm font-semibold text-gray-700">{pct(item.rate)}</div>
-                    <div className="mt-3 text-sm leading-6 text-gray-600">{item.interpretation}</div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">第一階段平均初始分類對齊度</div>
-                <div className="mt-2 text-3xl font-black">{pct(summary.avgStage1Alignment)}</div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">後續整體判定表現</div>
-                <div className="mt-2 text-3xl font-black">
-                  {pct(summary.avgPostOverallAccuracy)}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">平均前後差值</div>
-                <div className="mt-2 text-3xl font-black">
-                  {summary.avgPrePostDelta >= 0 ? '+' : ''}
-                  {pct(summary.avgPrePostDelta)}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="text-sm text-gray-500">可比較前後變化學生</div>
-                <div className="mt-2 text-3xl font-black">{summary.comparableStudents}</div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="text-2xl font-black text-gray-900">學習流程漏斗</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                這一區用來看學生主要卡在哪一階段。若大量學生停在第二或第三階段，表示問題未必只是知識，而可能是規則理解、操作負荷或任務門檻。
-              </p>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-                <div className="rounded-2xl border border-gray-200 p-5">
-                  <div className="text-sm text-gray-500">尚未開始</div>
-                  <div className="mt-2 text-3xl font-black">{stageFunnel.inactive}</div>
-                </div>
-                <div className="rounded-2xl border border-gray-200 p-5">
-                  <div className="text-sm text-gray-500">停留第 1 階段</div>
-                  <div className="mt-2 text-3xl font-black">{stageFunnel.stage1}</div>
-                </div>
-                <div className="rounded-2xl border border-gray-200 p-5">
-                  <div className="text-sm text-gray-500">停留第 2 階段</div>
-                  <div className="mt-2 text-3xl font-black">{stageFunnel.awareness}</div>
-                </div>
-                <div className="rounded-2xl border border-gray-200 p-5">
-                  <div className="text-sm text-gray-500">停留第 3 階段</div>
-                  <div className="mt-2 text-3xl font-black">{stageFunnel.evidence}</div>
-                </div>
-                <div className="rounded-2xl border border-gray-200 p-5">
-                  <div className="text-sm text-gray-500">已完成</div>
-                  <div className="mt-2 text-3xl font-black">{stageFunnel.done}</div>
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="text-2xl font-black text-gray-900">可能的迷思概念</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                這裡只看實際作答且答錯的資料，不把未作答納入分母，因此較能反映真正的共同迷思，而不是未完成造成的假性低分。
-              </p>
-
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-left">
-                      <th className="px-3 py-2">生物</th>
-                      <th className="px-3 py-2">正確門別</th>
-                      <th className="px-3 py-2">常見誤判</th>
-                      <th className="px-3 py-2">次數</th>
-                      <th className="px-3 py-2">教師詮釋</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {misconceptionPatterns.map((row) => (
-                      <tr key={`${row.animalName}-${row.wrongAnswer}`} className="border-b border-gray-100 align-top">
-                        <td className="px-3 py-2 font-semibold">{row.animalName}</td>
-                        <td className="px-3 py-2">{row.correctPhylum}</td>
-                        <td className="px-3 py-2">{row.wrongAnswer}</td>
-                        <td className="px-3 py-2">{row.count}</td>
-                        <td className="px-3 py-2 leading-6 text-gray-700">{row.interpretation}</td>
-                      </tr>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-lg font-black text-gray-900">最值得澄清的特徵</div>
+                  <div className="mt-2 text-sm leading-6 text-gray-600">教師最需要直接點名的，通常不是最常出現的特徵，而是最常把學生帶向錯誤的特徵。</div>
+                  <div className="mt-3 space-y-3">
+                    {decisions.clarifyFeatures.map((feature) => (
+                      <div key={feature.feature} className="rounded-2xl border border-gray-200 bg-white p-4">
+                        <div className="flex items-center gap-2">
+                          <div className="font-bold text-gray-900">{feature.feature}</div>
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${feature.cueType === '表面線索' ? 'bg-red-100 text-red-700' : feature.cueType === '結構線索' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>{feature.cueType}</span>
+                        </div>
+                        <div className="mt-2 grid gap-2 text-sm text-gray-700 sm:grid-cols-2 lg:grid-cols-4">
+                          <div>勾選次數：{feature.selectedCount}</div>
+                          <div>涉及學生：{feature.studentCount}</div>
+                          <div>勾選後正確率：{pct(feature.correctRateWhenSelected)}</div>
+                          <div>錯答比例：{pct(feature.wrongSelectionRate)}</div>
+                        </div>
+                        <div className="mt-2 text-sm leading-6 font-medium text-gray-900">教學建議：{feature.teachingNote}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </section>
+            </Section>
 
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="text-2xl font-black text-gray-900">各題判定診斷</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                這一區可協助教師辨識哪個生物最難判定、最常被誤判成哪一門，以及該錯誤較可能代表哪一種線索使用偏誤。
-              </p>
+            {data.sampleWarnings.length > 0 ? (
+              <Section title="解讀提醒" subtitle="先告訴教師哪些指標可以解讀、哪些只適合當早期訊號。">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {data.sampleWarnings.map((warning) => (
+                    <div key={warning.key} className={`rounded-2xl border p-4 ${severityTone(warning.level === 'warn' ? 'warn' : 'info')}`}>
+                      <div className="text-sm font-bold text-gray-900">{warning.key}</div>
+                      <div className="mt-2 text-sm leading-6 text-gray-700">{warning.message}</div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            ) : null}
 
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full border-collapse text-sm">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+              <SummaryCard title="完成率" value={pct(data.summary.completionRate)} helper={`${data.summary.completedStudents} / ${data.summary.totalStudents} 位學生`} />
+              <SummaryCard title="evidence 正確率" value={pct(data.summary.evidenceAccuracy)} helper={`以 ${data.sampleBases.evidenceStudents} 位學生、${data.sampleBases.evidenceItems} 題 item logs 計`} note={data.sampleBases.evidenceStudents < 5 ? '樣本偏少，請視為早期訊號。' : undefined} />
+              <SummaryCard title="transfer 正確率" value={pct(data.summary.transferAccuracy)} helper={`以 ${data.sampleBases.transferStudents} 位學生、${data.sampleBases.transferItems} 題 item logs 計`} note={data.sampleBases.transferStudents < 5 ? '樣本偏少，請勿直接視為全班定論。' : undefined} />
+              <SummaryCard title="SDI" value={num(data.summary.sdi, 2)} helper="evidence - transfer；越高越代表移除提示後表現下降" />
+              <SummaryCard title="平均 evidence 秒數" value={num(data.summary.avgEvidenceDurationSec, 1)} helper={`中位數 ${num(data.summary.medianEvidenceDurationSec, 1)} 秒`} />
+              <SummaryCard title="zoom 使用率" value={pct(data.summary.zoomUserRate)} helper={`至少使用一次 zoom：${data.sampleBases.zoomStudents}/${data.sampleBases.totalStudents} 人；事件 ${data.sampleBases.zoomEvents} 筆`} />
+            </div>
+
+            <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+              <Section title="鷹架依賴與學習進度" subtitle="先看這班是概念未建立，還是有鷹架會做、離開提示就失準。">
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <div className="space-y-3">
+                    <div className="text-lg font-bold text-gray-900">學習階段分布</div>
+                    {data.stageFunnel.map((bucket) => (
+                      <BarRow key={bucket.stage} label={stageLabel(bucket.stage)} value={bucket.count} total={data.summary.totalStudents} />
+                    ))}
+                  </div>
+                  <div className="space-y-3">
+                    <div className="text-lg font-bold text-gray-900">風險分布</div>
+                    {data.riskDistribution.map((bucket) => (
+                      <BarRow
+                        key={bucket.level}
+                        label={bucket.level}
+                        value={bucket.count}
+                        total={data.summary.totalStudents}
+                        colorClass={bucket.level === '高' ? 'bg-red-500' : bucket.level === '中' ? 'bg-yellow-500' : bucket.level === '低' ? 'bg-green-500' : 'bg-gray-500'}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="教師解讀提示" subtitle="這裡不是只有數據，而是幫你把觀察翻成教學決策語言。">
+                <div className="space-y-3">
+                  {data.insightCards.map((card, index) => (
+                    <div key={`${card.title}-${index}`} className={`rounded-2xl border p-4 ${severityTone(card.severity)}`}>
+                      <div className="text-base font-bold text-gray-900">{card.title}</div>
+                      <div className="mt-2 text-sm leading-6 text-gray-700">{card.body}</div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            </div>
+
+            <Section title="平台欲培養的分類能力" subtitle="保留上一版 teacher 的教學優勢：用能力面向，而不是只用分數面向來解讀學生。">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                {capability.map((item) => (
+                  <div key={item.title} className="rounded-2xl border border-gray-200 p-4">
+                    <div className="text-sm font-semibold text-gray-500">{item.title}</div>
+                    <div className="mt-2 text-2xl font-black text-gray-900">{item.count} / {item.total}</div>
+                    <div className="mt-1 text-sm font-semibold text-gray-700">{item.total > 0 ? pct(item.count / item.total) : '—'}</div>
+                    <div className="mt-3 text-sm leading-6 text-gray-600">{item.note}</div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="各題診斷與教學建議" subtitle="這一區優先回答：哪一題最值得重教？是耗時但不懂，還是快速亂答？是否存在高信心錯答？">
+              <div className="overflow-x-auto">
+                <table className="min-w-[1200px] border-separate border-spacing-y-2 text-sm">
                   <thead>
-                    <tr className="border-b border-gray-200 text-left">
-                      <th className="px-3 py-2">生物</th>
-                      <th className="px-3 py-2">正確門別</th>
-                      <th className="px-3 py-2">答對 / 作答</th>
+                    <tr className="text-left text-gray-500">
+                      <th className="px-3 py-2">題目</th>
+                      <th className="px-3 py-2">作答人次</th>
                       <th className="px-3 py-2">正確率</th>
-                      <th className="px-3 py-2">最常見錯答</th>
-                      <th className="px-3 py-2">教師詮釋</th>
+                      <th className="px-3 py-2">平均秒數</th>
+                      <th className="px-3 py-2">中位數秒數</th>
+                      <th className="px-3 py-2">平均信心</th>
+                      <th className="px-3 py-2">zoom 使用率</th>
+                      <th className="px-3 py-2">常見錯答</th>
+                      <th className="px-3 py-2">常見誤用特徵</th>
+                      <th className="px-3 py-2">教師建議</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {itemAccuracy.map((row) => (
-                      <tr key={row.animalName} className="border-b border-gray-100 align-top">
-                        <td className="px-3 py-2 font-semibold">{row.animalName}</td>
-                        <td className="px-3 py-2">{row.correctPhylum}</td>
-                        <td className="px-3 py-2">
-                          {row.correct} / {row.respondents}
-                        </td>
-                        <td className="px-3 py-2">{pct(row.accuracy)}</td>
-                        <td className="px-3 py-2">
-                          {row.topWrongAnswers.length
-                            ? row.topWrongAnswers
-                                .map((item) => `${item.answer}（${item.count}）`)
-                                .join('、')
-                            : '—'}
-                        </td>
-                        <td className="px-3 py-2 leading-6 text-gray-700">{row.interpretation}</td>
+                    {data.questionMetrics.map((q) => (
+                      <tr key={q.key} className="rounded-2xl bg-gray-50 align-top">
+                        <td className="px-3 py-3 font-semibold text-gray-900">{q.stage}/{q.questionId} {q.animalName ?? ''}</td>
+                        <td className="px-3 py-3">{q.respondents}</td>
+                        <td className="px-3 py-3">{pct(q.accuracy)}</td>
+                        <td className="px-3 py-3">{num(q.avgDurationSec, 1)}</td>
+                        <td className="px-3 py-3">{num(q.medianDurationSec, 1)}</td>
+                        <td className="px-3 py-3">{num(q.avgConfidence, 1)}</td>
+                        <td className="px-3 py-3">{pct(q.zoomUserRate)}</td>
+                        <td className="px-3 py-3">{q.topWrongAnswers.length ? q.topWrongAnswers.join('、') : '—'}</td>
+                        <td className="px-3 py-3">{q.topWrongFeatures.length ? q.topWrongFeatures.join('、') : '—'}</td>
+                        <td className="px-3 py-3 text-gray-700">{getQuestionAction(q)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </section>
+            </Section>
 
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="text-2xl font-black text-gray-900">第二階段線索使用分布</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                這一區可用來判斷學生是否真的學會區分關鍵線索與輔助線索。若表面線索經常被放到關鍵區，通常表示規則建構仍不穩。
-              </p>
-
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-left">
-                      <th className="px-3 py-2">特徵</th>
-                      <th className="px-3 py-2">類型</th>
-                      <th className="px-3 py-2">列為關鍵</th>
-                      <th className="px-3 py-2">列為輔助</th>
-                      <th className="px-3 py-2">總次數</th>
-                      <th className="px-3 py-2">教師詮釋</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {featureUsage.map((row) => (
-                      <tr key={row.feature} className="border-b border-gray-100 align-top">
-                        <td className="px-3 py-2 font-semibold">{row.feature}</td>
-                        <td className="px-3 py-2">{row.featureType}</td>
-                        <td className="px-3 py-2">{row.diagnostic}</td>
-                        <td className="px-3 py-2">{row.possible}</td>
-                        <td className="px-3 py-2">{row.total}</td>
-                        <td className="px-3 py-2 leading-6 text-gray-700">{row.interpretation}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <h2 className="text-2xl font-black text-gray-900">班級比較</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
-                建議不要只看平均分數，而要同時看完成率、第二階段平均秒數、重試次數，以及前後變化差值，才能分辨是概念問題、流程問題，還是規則理解負荷過高。
-              </p>
-
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-[1400px] border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-left">
-                      <th className="px-3 py-2">學校</th>
-                      <th className="px-3 py-2">年級</th>
-                      <th className="px-3 py-2">班級</th>
-                      <th className="px-3 py-2">學生數</th>
-                      <th className="px-3 py-2">完成人數</th>
-                      <th className="px-3 py-2">完成率</th>
-                      <th className="px-3 py-2">完成者平均正確率</th>
-                      <th className="px-3 py-2">第二階段平均秒數</th>
-                      <th className="px-3 py-2">平均重試次數</th>
-                      <th className="px-3 py-2">初始分類對齊度</th>
-                      <th className="px-3 py-2">前後差值</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {classSummary.map((row) => (
-                      <tr key={row.key} className="border-b border-gray-100">
-                        <td className="px-3 py-2 font-semibold">{row.schoolCode}</td>
-                        <td className="px-3 py-2">{row.grade}</td>
-                        <td className="px-3 py-2">{row.className}</td>
-                        <td className="px-3 py-2">{row.studentCount}</td>
-                        <td className="px-3 py-2">{row.completedCount}</td>
-                        <td className="px-3 py-2">{pct(row.completionRate)}</td>
-                        <td className="px-3 py-2">{pct(row.avgAccuracyCompleted)}</td>
-                        <td className="px-3 py-2">{row.avgAwarenessSeconds.toFixed(1)}</td>
-                        <td className="px-3 py-2">{row.avgReadinessRetryCount.toFixed(2)}</td>
-                        <td className="px-3 py-2">{pct(row.avgStage1Alignment)}</td>
-                        <td className="px-3 py-2">
-                          {row.avgPrePostDelta >= 0 ? '+' : ''}
-                          {pct(row.avgPrePostDelta)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-200 bg-white p-6">
-              <div className="flex flex-col gap-3">
-                <div>
-                  <h2 className="text-2xl font-black text-gray-900">學生摘要與個別診斷</h2>
-                  <p className="mt-2 text-sm leading-6 text-gray-600">
-                    這裡適合教師做個別追蹤：看某位學生原本的初始分類是否接近真實門別、後來是否轉向結構線索、後測是否真的把規則套用出來。
-                  </p>
+            <div className="grid gap-5 xl:grid-cols-2">
+              <Section title="特徵使用面板" subtitle="看哪些特徵常被勾選、勾選後常答錯，幫助教師判斷哪些線索需要直接回教。">
+                <div className="space-y-3">
+                  {data.featureMetrics.slice(0, 8).map((feature) => (
+                    <div key={feature.feature} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="flex items-center gap-2">
+                        <div className="font-bold text-gray-900">{feature.feature}</div>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${feature.cueType === '表面線索' ? 'bg-red-100 text-red-700' : feature.cueType === '結構線索' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>{feature.cueType}</span>
+                      </div>
+                      <div className="mt-2 grid gap-2 text-sm text-gray-700 sm:grid-cols-2">
+                        <div>勾選次數：{feature.selectedCount}（涉及 {feature.studentCount} 位學生）</div>
+                        <div>勾選後正確率：{pct(feature.correctRateWhenSelected)}</div>
+                        <div>evidence：{feature.evidenceCount}</div>
+                        <div>transfer：{feature.transferCount}</div>
+                      </div>
+                      <div className="mt-2 text-sm leading-6 text-gray-700">{getFeatureTeachingNote(feature)}</div>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              </Section>
 
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-[2200px] border-collapse text-sm">
+              <Section title="迷思線索排行榜" subtitle="這一區不是看哪個特徵出現，而是看哪些特徵最常伴隨錯答，尤其是高信心錯答。">
+                <div className="space-y-3">
+                  {data.misconceptionMetrics.slice(0, 8).map((item) => (
+                    <div key={item.feature} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="flex items-center gap-2">
+                        <div className="font-bold text-gray-900">{item.feature}</div>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${item.cueType === '表面線索' ? 'bg-red-100 text-red-700' : item.cueType === '結構線索' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>{item.cueType}</span>
+                      </div>
+                      <div className="mt-2 grid gap-2 text-sm text-gray-700 sm:grid-cols-2">
+                        <div>錯答中出現：{item.wrongCount} 次</div>
+                        <div>涉及學生：{item.wrongStudentCount} 位</div>
+                        <div>涉及題目：{item.wrongQuestionCount} 題</div>
+                        <div>高信心錯答：{item.highConfidenceWrongCount} 次</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            </div>
+
+            <Section title="學生個別診斷" subtitle="這裡適合補救教學：先看誰需要優先介入，再看其 evidence / transfer 落差、特徵使用與作答時間。">
+              <div className="overflow-x-auto">
+                <table className="min-w-[1400px] border-separate border-spacing-y-2 text-sm">
                   <thead>
-                    <tr className="border-b border-gray-200 text-left">
-                      <th className="px-3 py-2">學校</th>
-                      <th className="px-3 py-2">班級 / 座號</th>
-                      <th className="px-3 py-2">學生（遮罩）</th>
-                      <th className="px-3 py-2">狀態</th>
+                    <tr className="text-left text-gray-500">
+                      <th className="px-3 py-2">學生</th>
+                      <th className="px-3 py-2">目前階段</th>
                       <th className="px-3 py-2">風險</th>
-                      <th className="px-3 py-2">第一階段初始分類對齊度</th>
-                      <th className="px-3 py-2">後續整體判定</th>
-                      <th className="px-3 py-2">前後差值</th>
-                      <th className="px-3 py-2">作答進度</th>
-                      <th className="px-3 py-2">第二階段</th>
-                      <th className="px-3 py-2">第一階段操作</th>
-                      <th className="px-3 py-2">原本線索</th>
-                      <th className="px-3 py-2">後來線索</th>
-                      <th className="px-3 py-2">改變類型</th>
-                      <th className="px-3 py-2">改變敘事</th>
-                      <th className="px-3 py-2">前後比較詮釋</th>
-                      <th className="px-3 py-2">風險標記</th>
-                      <th className="px-3 py-2">更新時間</th>
+                      <th className="px-3 py-2">evidence</th>
+                      <th className="px-3 py-2">transfer</th>
+                      <th className="px-3 py-2">SDI</th>
+                      <th className="px-3 py-2">平均耗時</th>
+                      <th className="px-3 py-2">zoom</th>
+                      <th className="px-3 py-2">特徵取向</th>
+                      <th className="px-3 py-2">教師先看</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredStudents.map((row) => (
-                      <tr key={row.id} className="border-b border-gray-100 align-top">
-                        <td className="px-3 py-2 font-semibold">{row.schoolCode}</td>
-                        <td className="px-3 py-2">
-                          {row.grade || '—'} 年級 {row.className || '—'} 班 {row.seatNo || '—'} 號
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="font-semibold">{row.maskedName}</div>
-                          <div className="mt-1 text-xs text-gray-500">{row.participantCode}</div>
-                        </td>
-                        <td className="px-3 py-2">
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${badgeClass(row.statusLabel)}`}>
-                            {row.statusLabel}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${riskClass(row.riskLevel)}`}>
-                            {row.riskLevel.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">{pct(row.stage1AlignmentScore)}</td>
-                        <td className="px-3 py-2">
-                          <div>{row.correctCount} / {row.totalQuestionCount}</div>
-                          <div className="text-xs text-gray-500">{pct(row.overallAccuracy)}</div>
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.prePostDelta >= 0 ? '+' : ''}
-                          {pct(row.prePostDelta)}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.answeredCount} / {row.totalQuestionCount}
-                        </td>
-                        <td className="px-3 py-2 leading-6">
-                          <div>秒數：{row.awarenessSecondsSpent}</div>
-                          <div>重試：{row.readinessRetryCount}</div>
-                          <div>一次答對：{row.readinessFirstPassCount}</div>
-                        </td>
-                        <td className="px-3 py-2 leading-6">
-                          <div>拖曳：{row.cardMoveCount}</div>
-                          <div>新增群組：{row.groupCreateCount}</div>
-                          <div>混合群組：{row.mixedGroupCount}</div>
-                        </td>
-                        <td className="px-3 py-2">{row.stage1CueOrientation}</td>
-                        <td className="px-3 py-2">{row.stage2CueOrientation}</td>
-                        <td className="px-3 py-2 font-semibold">{row.changeCategory}</td>
-                        <td className="px-3 py-2 leading-6 text-gray-700">{row.changeNarrative}</td>
-                        <td className="px-3 py-2 leading-6 text-gray-700">{row.prePostNarrative}</td>
-                        <td className="px-3 py-2 leading-6">
-                          {row.riskFlags.length ? row.riskFlags.join('、') : '—'}
-                        </td>
-                        <td className="px-3 py-2">
-                          {new Date(row.updatedAt).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
+                    {data.studentRows.map((student) => {
+                      const diag = diagnoseStudent(student)
+                      return (
+                        <tr key={student.participantCode} className="rounded-2xl bg-gray-50 align-top">
+                          <td className="px-3 py-3">
+                            <div className="font-semibold text-gray-900">{student.maskedName || '未具名'}</div>
+                            <div className="text-xs text-gray-500">{student.schoolCode || '—'}｜{student.grade || '—'} 年級 {student.className || '—'} 班 {student.seatNo || '—'} 號</div>
+                            <div className="text-xs text-gray-400">{student.participantCode}</div>
+                          </td>
+                          <td className="px-3 py-3">{stageLabel(student.currentStage)}</td>
+                          <td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${riskTone(student.riskLevel)}`}>{student.riskLevel}</span></td>
+                          <td className="px-3 py-3">{student.evidenceCount > 0 ? `${pct(student.evidenceAccuracy)}（${student.evidenceCount} 題）` : '—'}</td>
+                          <td className="px-3 py-3">{student.transferCount > 0 ? `${pct(student.transferAccuracy)}（${student.transferCount} 題）` : '—'}</td>
+                          <td className="px-3 py-3">{num(student.sdi, 2)}</td>
+                          <td className="px-3 py-3">evidence {num(student.avgEvidenceDurationSec, 1)} 秒／transfer {num(student.avgTransferDurationSec, 1)} 秒</td>
+                          <td className="px-3 py-3">{student.zoomOpenCount} 次／{student.zoomQuestionCount} 題</td>
+                          <td className="px-3 py-3">結構線索比例 {pct(student.structuralFeatureRate)}</td>
+                          <td className="px-3 py-3 text-gray-700">{diag.reasons.join('、')}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
-            </section>
+            </Section>
           </>
         ) : null}
       </div>
