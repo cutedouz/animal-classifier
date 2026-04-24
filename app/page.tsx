@@ -440,6 +440,152 @@ const FEATURE_BANK = Array.from(
   new Set(PHYLUM_GUIDE.flatMap((guide) => [...guide.keyFeatures, ...guide.unstableClues]))
 )
 
+const ALLOW_POST_FEEDBACK_RETRY = false
+
+const STRUCTURAL_FEATURE_SET = new Set(PHYLUM_GUIDE.flatMap((guide) => guide.keyFeatures))
+const SURFACE_FEATURE_SET = new Set(PHYLUM_GUIDE.flatMap((guide) => guide.unstableClues))
+
+function getCueProfile(features: string[]) {
+  if (!features.length) {
+    return {
+      label: '未勾選特徵',
+      structuralCount: 0,
+      surfaceCount: 0,
+    }
+  }
+
+  const structuralCount = features.filter((feature) => STRUCTURAL_FEATURE_SET.has(feature)).length
+  const surfaceCount = features.filter((feature) => SURFACE_FEATURE_SET.has(feature)).length
+
+  if (structuralCount > 0 && surfaceCount === 0) {
+    return {
+      label: '以結構線索為主',
+      structuralCount,
+      surfaceCount,
+    }
+  }
+
+  if (surfaceCount > 0 && structuralCount === 0) {
+    return {
+      label: '以表面線索為主',
+      structuralCount,
+      surfaceCount,
+    }
+  }
+
+  if (structuralCount === 0 && surfaceCount === 0) {
+    return {
+      label: '線索類型尚未辨識',
+      structuralCount,
+      surfaceCount,
+    }
+  }
+
+  return {
+    label:
+      structuralCount >= surfaceCount
+        ? '結構與表面線索混合（偏結構）'
+        : '結構與表面線索混合（偏表面）',
+    structuralCount,
+    surfaceCount,
+  }
+}
+
+function getConfidenceText(confidence: number | null | undefined) {
+  if (confidence == null) return '未記錄信心'
+  if (confidence >= 4) return '高信心'
+  if (confidence === 3) return '中高信心'
+  if (confidence === 2) return '中低信心'
+  return '低信心'
+}
+
+function getQuestionAction(params: {
+  isCorrect: boolean | null
+  cueLabel: string
+  confidence: number | null | undefined
+  correctAnswer: SixPhylum | null
+}) {
+  const { isCorrect, cueLabel, confidence, correctAnswer } = params
+
+  if (isCorrect === true && cueLabel === '以結構線索為主') {
+    return '這題的判準較穩定，下一步請檢查自己能不能把同樣的判準套用到新的生物。'
+  }
+
+  if (isCorrect === true && cueLabel !== '以結構線索為主') {
+    return '這題雖然答對，但你仍可能混用了表面線索。下一步請試著只用結構特徵重新說一次理由。'
+  }
+
+  if ((confidence ?? 0) >= 3 && isCorrect === false) {
+    return `你這題屬於「有把握地答錯」，表示可能存在穩定迷思。請優先重看 ${correctAnswer ?? '正確門別'} 的關鍵特徵。`
+  }
+
+  if (cueLabel.includes('表面')) {
+    return `你這題主要受表面線索干擾。請改用能直接支持 ${correctAnswer ?? '正確門別'} 的身體構造或關鍵特徵重新判斷。`
+  }
+
+  return `建議先回看 ${correctAnswer ?? '正確門別'} 的提示卡，再用至少兩個結構特徵重寫一次理由。`
+}
+
+function getStudentDiagnosis(params: {
+  stage5Rows: Array<{
+    stageLabel: string
+    questionId: string
+    animalName: string
+    isCorrect: boolean | null
+    selectedFeatures: string[]
+    correctAnswer: SixPhylum | null
+    confidence: number | null
+  }>
+  correctCount: number
+  totalCount: number
+  transferCorrectCount: number
+  transferTotalCount: number
+}) {
+  const { stage5Rows, correctCount, totalCount, transferCorrectCount, transferTotalCount } = params
+
+  const answeredRows = stage5Rows.filter((row) => row.isCorrect !== null)
+  const wrongRows = answeredRows.filter((row) => row.isCorrect === false)
+  const structuralDominant = answeredRows.filter(
+    (row) => getCueProfile(row.selectedFeatures).label === '以結構線索為主'
+  ).length
+  const surfaceDominant = answeredRows.filter((row) =>
+    getCueProfile(row.selectedFeatures).label.includes('表面')
+  ).length
+  const highConfidenceWrong = wrongRows.filter((row) => (row.confidence ?? 0) >= 3).length
+
+  let headline = '你已完成本次任務，接下來請根據回饋調整判準。'
+  if (transferTotalCount > 0 && transferCorrectCount === transferTotalCount) {
+    headline = '你已能把前面學到的判準穩定用到新案例。'
+  } else if (transferTotalCount > 0 && transferCorrectCount < transferTotalCount) {
+    headline = '你在遷移到新案例時仍會失去部分判準，這是目前最需要加強的地方。'
+  }
+
+  let keyIssue = '你目前已開始建立分類規則。'
+  if (surfaceDominant > structuralDominant) {
+    keyIssue = '你目前最主要的問題是：仍常把表面線索當成關鍵判準。'
+  } else if (highConfidenceWrong > 0) {
+    keyIssue = '你目前最主要的問題是：有些錯誤判斷帶著較高信心，表示可能存在穩定迷思。'
+  } else if (wrongRows.length > 0) {
+    keyIssue = '你已開始使用部分結構線索，但在新題目中還不夠穩定。'
+  }
+
+  let nextStep = '下一步請先重看答錯題目的正確門別提示卡，再用兩個結構特徵重寫理由。'
+  if (surfaceDominant > structuralDominant) {
+    nextStep = '下一步請先把「外觀、顏色、棲地、是否固定不動」降到輔助位置，改用身體構造當主判準。'
+  } else if (highConfidenceWrong > 0) {
+    nextStep = '下一步請優先處理「高信心但答錯」的題目，因為那通常代表迷思比不確定更需要修正。'
+  } else if (wrongRows.length === 0) {
+    nextStep = '下一步請挑一題你原本最沒把握的題目，試著不用提示卡再說一次判斷理由。'
+  }
+
+  return {
+    headline,
+    keyIssue,
+    nextStep,
+    correctSummary: `${correctCount} / ${totalCount} 題正確`,
+  }
+}
+
 function shuffleArray<T>(items: T[]) {
   const arr = [...items]
   for (let i = arr.length - 1; i > 0; i -= 1) {
@@ -1303,6 +1449,99 @@ export default function Page() {
 
   const correctCount = evidenceResultRows.filter((row) => row.isCorrect === true).length
   const transferCorrectCount = transferResultRows.filter((row) => row.isCorrect === true).length
+
+  const evidenceConfidenceMap = useMemo(
+  () =>
+    Object.fromEntries(
+      evidenceResponses.map((item) => [item.questionId, item.confidence])
+    ) as Record<string, number>,
+  [evidenceResponses]
+)
+
+const transferConfidenceMap = useMemo(
+  () =>
+    Object.fromEntries(
+      transferResponses.map((item) => [item.questionId, item.confidence])
+    ) as Record<string, number>,
+  [transferResponses]
+)
+
+const stage5Rows = useMemo(
+  () => [
+    ...evidenceResultRows.map((row) => ({
+      ...row,
+      stageLabel: '第 3 階段',
+      confidence: evidenceConfidenceMap[row.questionId] ?? null,
+    })),
+    ...transferResultRows.map((row) => ({
+      ...row,
+      stageLabel: '第 4 階段',
+      confidence: transferConfidenceMap[row.questionId] ?? null,
+    })),
+  ],
+  [evidenceResultRows, transferResultRows, evidenceConfidenceMap, transferConfidenceMap]
+)
+
+const stage5Diagnosis = useMemo(
+  () =>
+    getStudentDiagnosis({
+      stage5Rows: stage5Rows.map((row) => ({
+        stageLabel: row.stageLabel,
+        questionId: row.questionId,
+        animalName: row.animalName,
+        isCorrect: row.isCorrect,
+        selectedFeatures: row.selectedFeatures,
+        correctAnswer: row.correctAnswer,
+        confidence: row.confidence,
+      })),
+      correctCount: correctCount + transferCorrectCount,
+      totalCount: stage3EvidenceQuestions.length + transferQuestions.length,
+      transferCorrectCount,
+      transferTotalCount: transferQuestions.length,
+    }),
+  [
+    stage5Rows,
+    correctCount,
+    transferCorrectCount,
+    stage3EvidenceQuestions.length,
+    transferQuestions.length,
+  ]
+)
+
+const stage5PriorityRows = useMemo(() => {
+  return [...stage5Rows]
+    .filter(
+      (row) =>
+        row.isCorrect === false ||
+        row.confidence == null ||
+        row.confidence <= 2 ||
+        getCueProfile(row.selectedFeatures).label.includes('表面')
+    )
+    .sort((a, b) => {
+      const aPriority =
+        a.stageLabel === '第 4 階段' && a.isCorrect === false
+          ? 0
+          : a.isCorrect === false
+            ? 1
+            : 2
+      const bPriority =
+        b.stageLabel === '第 4 階段' && b.isCorrect === false
+          ? 0
+          : b.isCorrect === false
+            ? 1
+            : 2
+      return aPriority - bPriority
+    })
+    .slice(0, 4)
+}, [stage5Rows])
+
+const stage5ReviewPhyla = useMemo(() => {
+  const wrongAnswers = stage5Rows
+    .filter((row) => row.isCorrect === false && row.correctAnswer)
+    .map((row) => row.correctAnswer as SixPhylum)
+
+  return Array.from(new Set(wrongAnswers)).slice(0, 2)
+}, [stage5Rows])
 
   function toggleDiagnosticFeature(feature: string) {
     if (diagnosticFeatures.includes(feature)) {
@@ -2976,184 +3215,203 @@ export default function Page() {
           )}
 
           {stage === 'done' && (
-            <section className="space-y-4">
-              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 5 階段：結果回饋</h2>
+  <section className="space-y-4">
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+      <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 5 階段：診斷式回饋</h2>
 
+      <div
+        className={`rounded-xl p-4 text-sm leading-6 ${
+          autoSubmitState === 'saved'
+            ? 'bg-green-50 text-green-900'
+            : autoSubmitState === 'saving'
+              ? 'bg-blue-50 text-blue-900'
+              : autoSubmitState === 'error'
+                ? 'bg-yellow-50 text-yellow-900'
+                : 'bg-gray-50 text-gray-800'
+        }`}
+      >
+        {autoSubmitMessage || '系統會在完成後自動儲存並送出結果，不需要額外操作。'}
+      </div>
+    </div>
+
+    <div className="grid gap-4 lg:grid-cols-3">
+      <SummaryBlock title="你的整體診斷">
+        <div className="space-y-2">
+          <div>{stage5Diagnosis.headline}</div>
+          <div>{stage5Diagnosis.keyIssue}</div>
+          <div className="font-semibold text-gray-900">{stage5Diagnosis.correctSummary}</div>
+        </div>
+      </SummaryBlock>
+
+      <SummaryBlock title="你目前的優勢">
+        <div className="space-y-2">
+          <div>
+            第 3 階段正確 {correctCount} / {stage3EvidenceQuestions.length} 題，
+            第 4 階段正確 {transferCorrectCount} / {transferQuestions.length} 題。
+          </div>
+          <div>
+            較有判斷力的線索：
+            {diagnosticFeatures.length ? diagnosticFeatures.join('、') : '尚未記錄'}
+          </div>
+          <div>
+            這表示你已開始建立自己的分類規則，不只是憑直覺作答。
+          </div>
+        </div>
+      </SummaryBlock>
+
+      <SummaryBlock title="你下一步最該做的事">
+        <div className="space-y-2">
+          <div>{stage5Diagnosis.nextStep}</div>
+          <div>
+            建議優先重看：
+            {stage5ReviewPhyla.length ? stage5ReviewPhyla.join('、') : '先從答錯題目對應的門別開始'}
+          </div>
+          <div>
+            作法：先看提示卡，再用「至少兩個結構特徵」重寫一次判斷理由。
+          </div>
+        </div>
+      </SummaryBlock>
+    </div>
+
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+      <div className="mb-4 text-2xl font-black">優先重看清單</div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {stage5PriorityRows.map((row) => {
+          const cueProfile = getCueProfile(row.selectedFeatures)
+          const actionText = getQuestionAction({
+            isCorrect: row.isCorrect,
+            cueLabel: cueProfile.label,
+            confidence: row.confidence,
+            correctAnswer: row.correctAnswer,
+          })
+
+          return (
+            <div key={`${row.stageLabel}-${row.questionId}`} className="rounded-xl border border-gray-200 p-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="font-bold text-gray-900">
+                  {row.stageLabel}｜{row.animalName}
+                </div>
                 <div
-                  className={`rounded-xl p-4 text-sm leading-6 ${
-                    autoSubmitState === 'saved'
-                      ? 'bg-green-50 text-green-900'
-                      : autoSubmitState === 'saving'
-                        ? 'bg-blue-50 text-blue-900'
-                        : autoSubmitState === 'error'
-                          ? 'bg-yellow-50 text-yellow-900'
-                          : 'bg-gray-50 text-gray-800'
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    row.isCorrect === true
+                      ? 'bg-green-100 text-green-700'
+                      : row.isCorrect === false
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-gray-100 text-gray-700'
                   }`}
                 >
-                  {autoSubmitMessage || '系統會在完成後自動儲存並送出，不需要額外操作。'}
+                  {row.isCorrect === true ? '正確' : row.isCorrect === false ? '需優先修正' : '未作答'}
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-                <SummaryBlock title="階段 1">
-                  <div>非空群組：{nonEmptyGroups.length}</div>
-                  <div>全部卡片已分類：{bankCardIds.length === 0 ? '是' : '否'}</div>
-                  <div className="mt-2">整體分類想法：{overallReason}</div>
-                </SummaryBlock>
-
-                <SummaryBlock title="階段 2">
-                  <div>較適合幫助分門：{diagnosticCount} 項</div>
-                  <div>可能有幫助但不穩定：{possibleCount} 項</div>
-                  <div className="mt-2">就緒檢核：{readinessComplete ? '通過' : '未通過'}</div>
-                </SummaryBlock>
-
-                <SummaryBlock title="階段 3">
-                  <div>
-                    正確題數：{correctCount} / {stage3EvidenceQuestions.length}
-                  </div>
-                  <div className="mt-2">
-                    已完成門別判定：{evidenceResponses.length} / {stage3EvidenceQuestions.length}
-                  </div>
-                </SummaryBlock>
-
-                <SummaryBlock title="階段 4">
-                  <div>
-                    正確題數：{transferCorrectCount} / {transferQuestions.length}
-                  </div>
-                  <div className="mt-2">
-                    已完成遷移應用：{transferResponses.length} / {transferQuestions.length}
-                  </div>
-                </SummaryBlock>
-
-                <SummaryBlock title="下一步建議">
-                  <div>
-                    {transferCorrectCount === transferQuestions.length
-                      ? '你已能把前面學到的分類判準用到新的案例上。可再回看第一階段，觀察自己原本的分類依據如何改變。'
-                      : '請優先檢查遷移題中答錯的題目，看看自己是否仍容易被外觀、棲地或單一線索干擾。'}
-                  </div>
-                </SummaryBlock>
-              </div>
-
-              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <div className="mb-4 text-2xl font-black">第 3 階段逐題結果與回饋</div>
-
-                <div className="space-y-4">
-                  {evidenceResultRows.map((row, index) => (
-                    <div key={row.questionId} className="rounded-xl border border-gray-200 p-4">
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                        <div className="font-bold text-gray-900">
-                          第 {index + 1} 題：{row.animalName}
-                        </div>
-                        <div
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            row.isCorrect === true
-                              ? 'bg-green-100 text-green-700'
-                              : row.isCorrect === false
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-gray-100 text-gray-700'
-                          }`}
-                        >
-                          {row.isCorrect === true ? '正確' : row.isCorrect === false ? '需修正' : '未作答'}
-                        </div>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-700">
-                          <div>你的答案：{row.userAnswer || '未作答'}</div>
-                          <div>
-                            你的依據：{row.selectedFeatures.length ? row.selectedFeatures.join('、') : '未勾選'}
-                          </div>
-                        </div>
-
-                        <div className="rounded-lg bg-blue-50 p-3 text-sm leading-6 text-gray-700">
-                          <div>正確門別：{row.correctAnswer ?? '未設定'}</div>
-                          <div>
-                            推薦先看的特徵：
-                            {row.recommendedFeatures.length ? row.recommendedFeatures.join('、') : '未設定'}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 rounded-lg bg-yellow-50 p-3 text-sm leading-6 text-yellow-900">
-                        系統回饋：{row.feedback}
-                      </div>
-                    </div>
-                  ))}
+              <div className="space-y-2 text-sm leading-6 text-gray-700">
+                <div>你的答案：{row.userAnswer || '未作答'}</div>
+                <div>正確門別：{row.correctAnswer ?? '未設定'}</div>
+                <div>線索判讀：{cueProfile.label}</div>
+                <div>信心狀態：{getConfidenceText(row.confidence)}</div>
+                <div>
+                  你勾選的特徵：
+                  {row.selectedFeatures.length ? row.selectedFeatures.join('、') : '未勾選'}
+                </div>
+                <div className="rounded-lg bg-yellow-50 p-3 text-yellow-900">
+                  建議行動：{actionText}
                 </div>
               </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <div className="mb-4 text-2xl font-black">第 4 階段逐題結果與回饋</div>
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+      <div className="mb-4 text-2xl font-black">逐題診斷回饋</div>
 
-                <div className="space-y-4">
-                  {transferResultRows.map((row, index) => (
-                    <div key={row.questionId} className="rounded-xl border border-gray-200 p-4">
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                        <div className="font-bold text-gray-900">
-                          第 {index + 1} 題：{row.animalName}
-                        </div>
-                        <div
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            row.isCorrect === true
-                              ? 'bg-green-100 text-green-700'
-                              : row.isCorrect === false
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-gray-100 text-gray-700'
-                          }`}
-                        >
-                          {row.isCorrect === true ? '正確' : row.isCorrect === false ? '需修正' : '未作答'}
-                        </div>
-                      </div>
+      <div className="space-y-4">
+        {stage5Rows.map((row, index) => {
+          const cueProfile = getCueProfile(row.selectedFeatures)
+          const actionText = getQuestionAction({
+            isCorrect: row.isCorrect,
+            cueLabel: cueProfile.label,
+            confidence: row.confidence,
+            correctAnswer: row.correctAnswer,
+          })
 
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-700">
-                          <div>你的答案：{row.userAnswer || '未作答'}</div>
-                          <div>
-                            你的依據：{row.selectedFeatures.length ? row.selectedFeatures.join('、') : '未勾選'}
-                          </div>
-                        </div>
-
-                        <div className="rounded-lg bg-blue-50 p-3 text-sm leading-6 text-gray-700">
-                          <div>正確門別：{row.correctAnswer ?? '未設定'}</div>
-                          <div>
-                            推薦先看的特徵：
-                            {row.recommendedFeatures.length ? row.recommendedFeatures.join('、') : '未設定'}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 rounded-lg bg-yellow-50 p-3 text-sm leading-6 text-yellow-900">
-                        系統回饋：{row.feedback}
-                      </div>
-                    </div>
-                  ))}
+          return (
+            <div key={`${row.stageLabel}-${row.questionId}`} className="rounded-xl border border-gray-200 p-4">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                <div className="font-bold text-gray-900">
+                  {row.stageLabel} 第 {index + 1} 題：{row.animalName}
                 </div>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const targetIndex =
-                      transferResponses.length > 0 ? transferResponses.length - 1 : 0
-                    openTransferQuestion(targetIndex)
-                    setStage('transfer')
-                  }}
-                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
+                <div
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    row.isCorrect === true
+                      ? 'bg-green-100 text-green-700'
+                      : row.isCorrect === false
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-gray-100 text-gray-700'
+                  }`}
                 >
-                  回到階段 4
-                </button>
-                <button
-                  type="button"
-                  onClick={() => window.location.reload()}
-                  className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white sm:w-auto"
-                >
-                  重新開始
-                </button>
+                  {row.isCorrect === true ? '正確' : row.isCorrect === false ? '需修正' : '未作答'}
+                </div>
               </div>
-            </section>
-          )}
+
+              <div className="grid gap-3 lg:grid-cols-3">
+                <div className="rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+                  <div>你的答案：{row.userAnswer || '未作答'}</div>
+                  <div>正確門別：{row.correctAnswer ?? '未設定'}</div>
+                  <div>信心：{getConfidenceText(row.confidence)}</div>
+                </div>
+
+                <div className="rounded-lg bg-blue-50 p-3 text-sm leading-6 text-gray-700">
+                  <div>你勾選的特徵：{row.selectedFeatures.length ? row.selectedFeatures.join('、') : '未勾選'}</div>
+                  <div>線索判讀：{cueProfile.label}</div>
+                  <div>
+                    推薦先看：
+                    {row.recommendedFeatures.length ? row.recommendedFeatures.join('、') : '未設定'}
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-yellow-50 p-3 text-sm leading-6 text-yellow-900">
+                  <div>系統回饋：{row.feedback}</div>
+                  <div className="mt-2">下一步：{actionText}</div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+
+    <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
+      {ALLOW_POST_FEEDBACK_RETRY ? (
+        <button
+          type="button"
+          onClick={() => {
+            const targetIndex =
+              transferResponses.length > 0 ? transferResponses.length - 1 : 0
+            openTransferQuestion(targetIndex)
+            setStage('transfer')
+          }}
+          className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
+        >
+          回到階段 4
+        </button>
+      ) : (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+          研究版設定：查看回饋後不再回改正式答案。若要重做，請重新開始一次新的作答。
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white sm:w-auto"
+      >
+        重新開始
+      </button>
+    </div>
+  </section>
+)}
         </div>
       </div>
     </main>
