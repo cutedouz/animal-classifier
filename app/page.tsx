@@ -45,6 +45,12 @@ type EvidenceResponse = {
   animalName: string
   answer: SixPhylum
   selectedFeatures: string[]
+
+  // v10 後新增：記錄當題實際呈現給學生的特徵選項
+  featureOptionsShown?: string[]
+  maxSelectableFeatures?: number
+  featureOptionVersion?: string
+
   reasonText: string
   confidence: number
 }
@@ -106,6 +112,12 @@ type LearningItemLog = {
   durationMs: number | null
   finalAnswer: SixPhylum
   selectedFeatures: string[]
+
+  // v10 後新增：記錄當題實際呈現給學生的特徵選項
+  featureOptionsShown?: string[]
+  maxSelectableFeatures?: number
+  featureOptionVersion?: string
+
   reasonText: string
   confidence: number
   isCorrect: boolean | null
@@ -691,6 +703,8 @@ const FEATURE_BANK = [
   ...CORE_FEATURES,
   ...SUPPORTING_OR_MISLEADING_FEATURES,
 ]
+
+const FEATURE_OPTION_VERSION = '2026-04-26-v1'
 
 const ALLOW_POST_FEEDBACK_RETRY = false
 
@@ -2091,11 +2105,6 @@ const stage5ReviewPhyla = useMemo(() => {
     return null
   }
 
-    if (evidenceSelectedFeatures.length > 3) {
-  window.alert('第 3 階段最多只能選 3 個主要判斷特徵。')
-  return null
-}
-
     if (evidenceReasonText.trim().length < 8) {
       window.alert('請至少寫 8 個字，簡短說明判斷理由。')
       return null
@@ -2114,6 +2123,9 @@ const stage5ReviewPhyla = useMemo(() => {
   animalName,
   answer: evidenceAnswer,
   selectedFeatures: visibleSelectedFeatures,
+  featureOptionsShown: currentEvidenceFeatureOptions,
+  maxSelectableFeatures: 3,
+  featureOptionVersion: FEATURE_OPTION_VERSION,
   reasonText: evidenceReasonText,
   confidence: evidenceConfidence,
 }
@@ -2140,6 +2152,9 @@ const stage5ReviewPhyla = useMemo(() => {
   durationMs,
   finalAnswer: evidenceAnswer,
   selectedFeatures: visibleSelectedFeatures,
+  featureOptionsShown: currentEvidenceFeatureOptions,
+  maxSelectableFeatures: 3,
+  featureOptionVersion: FEATURE_OPTION_VERSION,
   reasonText: evidenceReasonText,
   confidence: evidenceConfidence,
   isCorrect: rule ? evidenceAnswer === rule.phylum : null,
@@ -2207,13 +2222,16 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
   const rule = ANIMAL_RULES[animalName]
 
   const nextResponse: EvidenceResponse = {
-    questionId: currentTransfer.id,
-    animalName,
-    answer: transferAnswer,
-    selectedFeatures: visibleSelectedFeatures,
-    reasonText: transferReasonText,
-    confidence: transferConfidence,
-  }
+  questionId: currentTransfer.id,
+  animalName,
+  answer: transferAnswer,
+  selectedFeatures: visibleSelectedFeatures,
+  featureOptionsShown: currentTransferFeatureOptions,
+  maxSelectableFeatures: 2,
+  featureOptionVersion: FEATURE_OPTION_VERSION,
+  reasonText: transferReasonText,
+  confidence: transferConfidence,
+}
 
   const nextResponses = upsertResponses(transferResponses, nextResponse, transferQuestions)
   setTransferResponses(nextResponses)
@@ -2226,18 +2244,21 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
       : null
 
   const nextItemLog: LearningItemLog = {
-    stage: 'transfer',
-    questionId: currentTransfer.id,
-    animalName,
-    enteredAt: transferQuestionEnteredAtRef.current,
-    submittedAt,
-    durationMs,
-    finalAnswer: transferAnswer,
-    selectedFeatures: visibleSelectedFeatures,
-    reasonText: transferReasonText,
-    confidence: transferConfidence,
-    isCorrect: rule ? transferAnswer === rule.phylum : null,
-  }
+  stage: 'transfer',
+  questionId: currentTransfer.id,
+  animalName,
+  enteredAt: transferQuestionEnteredAtRef.current,
+  submittedAt,
+  durationMs,
+  finalAnswer: transferAnswer,
+  selectedFeatures: visibleSelectedFeatures,
+  featureOptionsShown: currentTransferFeatureOptions,
+  maxSelectableFeatures: 2,
+  featureOptionVersion: FEATURE_OPTION_VERSION,
+  reasonText: transferReasonText,
+  confidence: transferConfidence,
+  isCorrect: rule ? transferAnswer === rule.phylum : null,
+}
 
   const nextItemLogs = upsertItemLogs(
     transferItemLogs,
@@ -2298,13 +2319,16 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
       const rule = ANIMAL_RULES[animalName]
 
       return {
-        questionId: question.id,
-        animalName,
-        answer: rule?.phylum ?? '刺絲胞動物門',
-        selectedFeatures: rule?.keyFeatures?.slice(0, 2) ?? ['刺絲胞', '觸手'],
-        reasonText: `我根據 ${rule?.keyFeatures?.slice(0, 2).join('、') ?? '特徵'} 進行判斷。`,
-        confidence: 3,
-      }
+  questionId: question.id,
+  animalName,
+  answer: rule?.phylum ?? '刺絲胞動物門',
+  selectedFeatures: rule?.keyFeatures?.slice(0, 2) ?? ['刺絲胞', '觸手'],
+  featureOptionsShown: getQuestionFeatureOptions(question),
+  maxSelectableFeatures: 2,
+  featureOptionVersion: FEATURE_OPTION_VERSION,
+  reasonText: `我根據 ${rule?.keyFeatures?.slice(0, 2).join('、') ?? '特徵'} 進行判斷。`,
+  confidence: 3,
+}
     })
   }
 
@@ -2501,7 +2525,13 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
     () => ({
       participantCode,
       participant: enterSession,
-      version: 'v9-stage3-with-event-logs',
+      version: 'v10-feature-options-3max-2max',
+featureOptionVersion: FEATURE_OPTION_VERSION,
+featureOptionPolicy: {
+  evidenceMaxSelectableFeatures: 3,
+  transferMaxSelectableFeatures: 2,
+  questionFeatureOptions: ANIMAL_FEATURE_OPTIONS,
+},
       stage1: {
         groups,
         bankCardIds,
