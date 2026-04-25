@@ -874,6 +874,15 @@ function getQuestionFeatureOptions(question: QuestionLike | null | undefined) {
   return ANIMAL_FEATURE_OPTIONS[animalName] ?? FEATURE_BANK
 }
 
+function sanitizeSelectedFeatures(
+  features: string[],
+  question: QuestionLike | null | undefined,
+  maxSelected: number
+) {
+  const options = getQuestionFeatureOptions(question)
+  return features.filter((feature) => options.includes(feature)).slice(0, maxSelected)
+}
+
 function moveCardBetweenContainers(params: {
   cardId: string
   source: 'bank' | 'group'
@@ -1061,6 +1070,8 @@ function FeatureCheckboxes({
   onChange: (next: string[]) => void
   maxSelected?: number
 }) {
+  const visibleSelected = selected.filter((feature) => options.includes(feature))
+
   const coreOptions = options.filter((feature) => STRUCTURAL_FEATURE_SET.has(feature))
   const supportingOptions = options.filter((feature) => SURFACE_FEATURE_SET.has(feature))
   const otherOptions = options.filter(
@@ -1068,8 +1079,8 @@ function FeatureCheckboxes({
   )
 
   function renderOption(feature: string) {
-    const checked = selected.includes(feature)
-    const reachedLimit = maxSelected != null && selected.length >= maxSelected
+    const checked = visibleSelected.includes(feature)
+    const reachedLimit = maxSelected != null && visibleSelected.length >= maxSelected
     const disabled = !checked && reachedLimit
 
     return (
@@ -1089,10 +1100,10 @@ function FeatureCheckboxes({
           disabled={disabled}
           onChange={(e) => {
             if (e.target.checked) {
-              if (maxSelected != null && selected.length >= maxSelected) return
-              onChange([...selected, feature])
+              if (maxSelected != null && visibleSelected.length >= maxSelected) return
+              onChange([...visibleSelected, feature])
             } else {
-              onChange(selected.filter((item) => item !== feature))
+              onChange(visibleSelected.filter((item) => item !== feature))
             }
           }}
           className="mt-1"
@@ -1107,7 +1118,7 @@ function FeatureCheckboxes({
       {maxSelected != null ? (
         <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
           請選出最主要的判斷依據，最多選 {maxSelected} 項。
-          目前已選 {selected.length} / {maxSelected} 項。
+          目前已選 {visibleSelected.length} / {maxSelected} 項。
         </div>
       ) : null}
 
@@ -1789,15 +1800,29 @@ const currentTransferFeatureOptions = useMemo(
     return next
   }, [stage1Complete, awarenessComplete, evidenceAllComplete, transferAllComplete])
 
-  const evidenceFormComplete =
-    Boolean(evidenceAnswer) &&
-    evidenceSelectedFeatures.length > 0 &&
-    evidenceReasonText.trim().length >= 8
+  const visibleEvidenceSelectedFeatures = currentEvidence
+  ? evidenceSelectedFeatures.filter((feature) =>
+      currentEvidenceFeatureOptions.includes(feature)
+    )
+  : []
 
-  const transferFormComplete =
-    Boolean(transferAnswer) &&
-    transferSelectedFeatures.length > 0 &&
-    transferReasonText.trim().length >= 8
+const visibleTransferSelectedFeatures = currentTransfer
+  ? transferSelectedFeatures.filter((feature) =>
+      currentTransferFeatureOptions.includes(feature)
+    )
+  : []
+
+const evidenceFormComplete =
+  Boolean(evidenceAnswer) &&
+  visibleEvidenceSelectedFeatures.length > 0 &&
+  visibleEvidenceSelectedFeatures.length <= 3 &&
+  evidenceReasonText.trim().length >= 8
+
+const transferFormComplete =
+  Boolean(transferAnswer) &&
+  visibleTransferSelectedFeatures.length > 0 &&
+  visibleTransferSelectedFeatures.length <= 2 &&
+  transferReasonText.trim().length >= 8
 
   const diagnosticCount = diagnosticFeatures.length
   const possibleCount = possibleFeatures.length
@@ -2040,22 +2065,31 @@ const stage5ReviewPhyla = useMemo(() => {
     setEvidenceIndex(index)
 
     if (saved) {
-      setEvidenceAnswer(saved.answer)
-      setEvidenceSelectedFeatures(saved.selectedFeatures)
-      setEvidenceReasonText(saved.reasonText)
-      setEvidenceConfidence(saved.confidence)
-    } else {
-      resetEvidenceForm()
-    }
+  setEvidenceAnswer(saved.answer)
+  setEvidenceSelectedFeatures(sanitizeSelectedFeatures(saved.selectedFeatures, question as QuestionLike, 3))
+  setEvidenceReasonText(saved.reasonText)
+  setEvidenceConfidence(saved.confidence)
+} else {
+  resetEvidenceForm()
+}
   }
 
   function saveCurrentEvidence(): EvidenceResponse[] | null {
-    if (!currentEvidence) return null
+  if (!currentEvidence) return null
 
-    if (evidenceSelectedFeatures.length === 0) {
-      window.alert('請先至少勾選一個判斷特徵。')
-      return null
-    }
+  const visibleSelectedFeatures = evidenceSelectedFeatures.filter((feature) =>
+    getQuestionFeatureOptions(currentEvidence as QuestionLike).includes(feature)
+  )
+
+  if (visibleSelectedFeatures.length === 0) {
+    window.alert('請先至少勾選一個判斷特徵。')
+    return null
+  }
+
+  if (visibleSelectedFeatures.length > 3) {
+    window.alert('第 3 階段最多只能選 3 個主要判斷特徵。')
+    return null
+  }
 
     if (evidenceSelectedFeatures.length > 3) {
   window.alert('第 3 階段最多只能選 3 個主要判斷特徵。')
@@ -2076,13 +2110,13 @@ const stage5ReviewPhyla = useMemo(() => {
     const rule = ANIMAL_RULES[animalName]
 
     const nextResponse: EvidenceResponse = {
-      questionId: currentEvidence.id,
-      animalName,
-      answer: evidenceAnswer,
-      selectedFeatures: evidenceSelectedFeatures,
-      reasonText: evidenceReasonText,
-      confidence: evidenceConfidence,
-    }
+  questionId: currentEvidence.id,
+  animalName,
+  answer: evidenceAnswer,
+  selectedFeatures: visibleSelectedFeatures,
+  reasonText: evidenceReasonText,
+  confidence: evidenceConfidence,
+}
 
     const nextResponses = upsertResponses(
       evidenceResponses,
@@ -2098,18 +2132,18 @@ const stage5ReviewPhyla = useMemo(() => {
         : null
 
     const nextItemLog: LearningItemLog = {
-      stage: 'evidence',
-      questionId: currentEvidence.id,
-      animalName,
-      enteredAt: evidenceQuestionEnteredAtRef.current,
-      submittedAt,
-      durationMs,
-      finalAnswer: evidenceAnswer,
-      selectedFeatures: evidenceSelectedFeatures,
-      reasonText: evidenceReasonText,
-      confidence: evidenceConfidence,
-      isCorrect: rule ? evidenceAnswer === rule.phylum : null,
-    }
+  stage: 'evidence',
+  questionId: currentEvidence.id,
+  animalName,
+  enteredAt: evidenceQuestionEnteredAtRef.current,
+  submittedAt,
+  durationMs,
+  finalAnswer: evidenceAnswer,
+  selectedFeatures: visibleSelectedFeatures,
+  reasonText: evidenceReasonText,
+  confidence: evidenceConfidence,
+  isCorrect: rule ? evidenceAnswer === rule.phylum : null,
+}
 
     const nextItemLogs = upsertItemLogs(
       evidenceItemLogs,
@@ -2122,91 +2156,98 @@ const stage5ReviewPhyla = useMemo(() => {
   }
 
   function openTransferQuestion(index: number, sourceResponses = transferResponses) {
-    const question = transferQuestions[index]
-    const saved = sourceResponses.find((item) => item.questionId === question.id)
+  const question = transferQuestions[index]
+  const saved = sourceResponses.find((item) => item.questionId === question.id)
 
-    transferQuestionEnteredAtRef.current = new Date().toISOString()
-    transferQuestionStartedAtRef.current = Date.now()
+  transferQuestionEnteredAtRef.current = new Date().toISOString()
+  transferQuestionStartedAtRef.current = Date.now()
 
-    setTransferIndex(index)
+  setTransferIndex(index)
 
-    if (saved) {
-      setTransferAnswer(saved.answer)
-      setTransferSelectedFeatures(saved.selectedFeatures)
-      setTransferReasonText(saved.reasonText)
-      setTransferConfidence(saved.confidence)
-    } else {
-      resetTransferForm()
-    }
+  if (saved) {
+    setTransferAnswer(saved.answer)
+    setTransferSelectedFeatures(
+      sanitizeSelectedFeatures(saved.selectedFeatures, question, 2)
+    )
+    setTransferReasonText(saved.reasonText)
+    setTransferConfidence(saved.confidence)
+  } else {
+    resetTransferForm()
   }
-
-  function saveCurrentTransfer(): EvidenceResponse[] | null {
-    if (!currentTransfer) return null
-
-    if (transferSelectedFeatures.length === 0) {
-      window.alert('請先至少勾選一個判斷特徵。')
-      return null
-    }
-
-    if (transferSelectedFeatures.length > 2) {
-  window.alert('第 4 階段最多只能選 2 個主要判斷特徵。')
-  return null
 }
 
-    if (transferReasonText.trim().length < 8) {
-      window.alert('請至少寫 8 個字，簡短說明判斷理由。')
-      return null
-    }
+function saveCurrentTransfer(): EvidenceResponse[] | null {
+  if (!currentTransfer) return null
 
-    if (!transferAnswer) {
-      window.alert('請再選擇一個門別。')
-      return null
-    }
+  const visibleSelectedFeatures = transferSelectedFeatures.filter((feature) =>
+    getQuestionFeatureOptions(currentTransfer).includes(feature)
+  )
 
-    const animalName = inferAnimalName(currentTransfer)
-    const rule = ANIMAL_RULES[animalName]
-
-    const nextResponse: EvidenceResponse = {
-      questionId: currentTransfer.id,
-      animalName,
-      answer: transferAnswer,
-      selectedFeatures: transferSelectedFeatures,
-      reasonText: transferReasonText,
-      confidence: transferConfidence,
-    }
-
-    const nextResponses = upsertResponses(transferResponses, nextResponse, transferQuestions)
-    setTransferResponses(nextResponses)
-
-    const submittedAt = new Date().toISOString()
-    const durationMs =
-      transferQuestionStartedAtRef.current !== null
-        ? Math.max(0, Date.now() - transferQuestionStartedAtRef.current)
-        : null
-
-    const nextItemLog: LearningItemLog = {
-      stage: 'transfer',
-      questionId: currentTransfer.id,
-      animalName,
-      enteredAt: transferQuestionEnteredAtRef.current,
-      submittedAt,
-      durationMs,
-      finalAnswer: transferAnswer,
-      selectedFeatures: transferSelectedFeatures,
-      reasonText: transferReasonText,
-      confidence: transferConfidence,
-      isCorrect: rule ? transferAnswer === rule.phylum : null,
-    }
-
-    const nextItemLogs = upsertItemLogs(
-      transferItemLogs,
-      nextItemLog,
-      transferQuestions
-    )
-    setTransferItemLogs(nextItemLogs)
-
-    return nextResponses
+  if (visibleSelectedFeatures.length === 0) {
+    window.alert('請先至少勾選一個判斷特徵。')
+    return null
   }
+
+  if (visibleSelectedFeatures.length > 2) {
+    window.alert('第 4 階段最多只能選 2 個主要判斷特徵。')
+    return null
+  }
+
+  if (transferReasonText.trim().length < 8) {
+    window.alert('請至少寫 8 個字，簡短說明判斷理由。')
+    return null
+  }
+
+  if (!transferAnswer) {
+    window.alert('請再選擇一個門別。')
+    return null
+  }
+
+  const animalName = inferAnimalName(currentTransfer)
+  const rule = ANIMAL_RULES[animalName]
+
+  const nextResponse: EvidenceResponse = {
+    questionId: currentTransfer.id,
+    animalName,
+    answer: transferAnswer,
+    selectedFeatures: visibleSelectedFeatures,
+    reasonText: transferReasonText,
+    confidence: transferConfidence,
+  }
+
+  const nextResponses = upsertResponses(transferResponses, nextResponse, transferQuestions)
+  setTransferResponses(nextResponses)
+  setTransferSelectedFeatures(visibleSelectedFeatures)
+
+  const submittedAt = new Date().toISOString()
+  const durationMs =
+    transferQuestionStartedAtRef.current !== null
+      ? Math.max(0, Date.now() - transferQuestionStartedAtRef.current)
+      : null
+
+  const nextItemLog: LearningItemLog = {
+    stage: 'transfer',
+    questionId: currentTransfer.id,
+    animalName,
+    enteredAt: transferQuestionEnteredAtRef.current,
+    submittedAt,
+    durationMs,
+    finalAnswer: transferAnswer,
+    selectedFeatures: visibleSelectedFeatures,
+    reasonText: transferReasonText,
+    confidence: transferConfidence,
+    isCorrect: rule ? transferAnswer === rule.phylum : null,
+  }
+
+  const nextItemLogs = upsertItemLogs(
+    transferItemLogs,
+    nextItemLog,
+    transferQuestions
+  )
+  setTransferItemLogs(nextItemLogs)
+
+  return nextResponses
+}
 
   function buildDemoStage1Groups(): StageGroup[] {
     const ids = stage1Cards.map((card) => card.id)
