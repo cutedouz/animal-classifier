@@ -64,6 +64,7 @@ type EnterSession = {
 type GuideCard = {
   phylum: SixPhylum
   examples: string[]
+  observePrompts: string[]
   keyFeatures: string[]
   unstableClues: string[]
   teacherTip: string
@@ -174,44 +175,74 @@ const PHYLUM_GUIDE: GuideCard[] = [
   {
     phylum: '刺絲胞動物門',
     examples: ['海葵', '水母'],
-    keyFeatures: ['刺絲胞', '觸手', '輻射對稱', '袋狀身體'],
-    unstableClues: ['顏色鮮豔', '外型像花'],
-    teacherTip: '先看刺絲胞與觸手，不要只看外觀像不像花。',
+    observePrompts: [
+      '先看口周圍或身體邊緣是否有觸手。',
+      '觀察身體構造是否由中央向外放射排列。',
+      '想一想：牠生活在水中，是否足以判斷門別？',
+    ],
+    keyFeatures: ['刺絲胞', '觸手', '輻射對稱'],
+    unstableClues: ['顏色鮮豔', '外型像花', '生活在水中'],
+    teacherTip: '先看刺絲胞、觸手與輻射對稱，不要只看外觀像不像花或是否生活在水中。',
   },
   {
     phylum: '扁形動物門',
     examples: ['渦蟲'],
+    observePrompts: [
+      '先看身體是否明顯扁平。',
+      '觀察身體左右兩側是否大致對稱。',
+      '檢查身體是否沒有一節一節的體節。',
+    ],
     keyFeatures: ['身體扁平', '左右對稱', '無體節'],
-    unstableClues: ['皆為寄生蟲', '生活在水中'],
-    teacherTip: '重點是扁平且無體節，不是只看細長。',
+    unstableClues: ['皆為寄生蟲', '生活在水中', '身體細長'],
+    teacherTip: '重點是身體扁平、左右對稱且無體節，不是只看牠小小的、細長或是否寄生。',
   },
   {
     phylum: '軟體動物門',
     examples: ['蛤蠣', '蝸牛'],
+    observePrompts: [
+      '先看是否有柔軟身體。',
+      '觀察是否有外套膜或由外套膜形成的殼。',
+      '觀察是否有肌肉足或類似足部的運動構造。',
+    ],
     keyFeatures: ['外套膜', '肌肉足', '多數有殼'],
     unstableClues: ['外表有殼', '看起來很軟'],
-    teacherTip: '殼常見，但不是唯一依據；要注意外套膜與肌肉足。',
+    teacherTip: '殼常見，但不能只看有沒有殼；要回到外套膜、肌肉足與柔軟身體等構造。',
   },
   {
     phylum: '環節動物門',
     examples: ['蚯蚓', '水蛭'],
+    observePrompts: [
+      '先看身體是否由許多相似的環狀體節組成。',
+      '觀察身體分節是否沿著前後方向重複出現。',
+      '想一想：身體細長是否一定代表環節動物？',
+    ],
     keyFeatures: ['身體分節', '環狀體節'],
     unstableClues: ['身體細長', '生活在泥土或水裡'],
-    teacherTip: '最關鍵的是體節，不是只看長條外形。',
+    teacherTip: '最關鍵的是體節與重複分節，不是只看長條外形或生活環境。',
   },
   {
     phylum: '節肢動物門',
     examples: ['蝴蝶', '蜘蛛', '螃蟹'],
+    observePrompts: [
+      '先看身體外面是否有較硬的外骨骼。',
+      '觀察身體是否分成不同區段。',
+      '觀察腳或附肢是否成對出現並有關節。',
+    ],
     keyFeatures: ['外骨骼', '身體分節', '成對附肢'],
     unstableClues: ['會飛', '腳很多', '住在海邊'],
-    teacherTip: '要看外骨骼、分節與附肢，而不是生活環境。',
+    teacherTip: '要看外骨骼、身體分節與成對附肢，而不是只看會不會飛、腳多不多或住在哪裡。',
   },
   {
     phylum: '棘皮動物門',
     examples: ['海膽', '海星'],
+    observePrompts: [
+      '先看體表是否有棘狀或粗糙構造。',
+      '觀察成體是否常呈五輻對稱。',
+      '注意是否具有棘皮動物特有的管足構造。',
+    ],
     keyFeatures: ['棘皮', '管足', '成體多為五輻對稱'],
-    unstableClues: ['固著不動', '有外骨骼'],
-    teacherTip: '重點不是像星星，而是棘皮、管足與五輻對稱。',
+    unstableClues: ['固著不動', '有外骨骼', '外型像星星'],
+    teacherTip: '重點不是像不像星星，而是棘皮、管足與成體五輻對稱等構造。',
   },
 ]
 
@@ -436,14 +467,235 @@ const ANIMAL_RULES: Record<
   },
 }
 
-const FEATURE_BANK = Array.from(
-  new Set(PHYLUM_GUIDE.flatMap((guide) => [...guide.keyFeatures, ...guide.unstableClues]))
-)
+const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
+  海葵: [
+    '刺絲胞',
+    '觸手',
+    '輻射對稱',
+    '袋狀身體',
+    '固著生活',
+    '水中生活',
+    '外表有殼或硬殼',
+    '左右對稱',
+  ],
+  水母: [
+    '刺絲胞',
+    '觸手',
+    '輻射對稱',
+    '袋狀身體',
+    '水中生活',
+    '柔軟身體',
+    '左右對稱',
+    '外骨骼',
+  ],
+  珊瑚: [
+    '刺絲胞',
+    '觸手',
+    '輻射對稱',
+    '袋狀身體',
+    '固著生活',
+    '水中生活',
+    '外表有殼或硬殼',
+    '左右對稱',
+  ],
+
+  渦蟲: [
+    '身體扁平',
+    '左右對稱',
+    '無體節',
+    '柔軟身體',
+    '身體細長',
+    '身體分節',
+    '環狀體節',
+    '寄生生活',
+  ],
+  中華肝吸蟲: [
+    '身體扁平',
+    '左右對稱',
+    '無體節',
+    '寄生生活',
+    '身體細長',
+    '身體分節',
+    '環狀體節',
+    '外骨骼',
+  ],
+
+  蛤蠣: [
+    '外套膜',
+    '肌肉足',
+    '柔軟身體',
+    '多數有殼',
+    '外表有殼或硬殼',
+    '外骨骼',
+    '身體分節',
+    '成對附肢',
+  ],
+  蝸牛: [
+    '外套膜',
+    '肌肉足',
+    '柔軟身體',
+    '多數有殼',
+    '外表有殼或硬殼',
+    '身體分節',
+    '外骨骼',
+    '成對附肢',
+  ],
+  中華槍烏賊: [
+    '外套膜',
+    '肌肉足',
+    '柔軟身體',
+    '觸手',
+    '多數有殼',
+    '外骨骼',
+    '成對附肢',
+    '水中生活',
+  ],
+
+  蚯蚓: [
+    '身體分節',
+    '環狀體節',
+    '身體細長',
+    '柔軟身體',
+    '無體節',
+    '外骨骼',
+    '成對附肢',
+    '身體扁平',
+  ],
+  水蛭: [
+    '身體分節',
+    '環狀體節',
+    '身體細長',
+    '柔軟身體',
+    '無體節',
+    '外骨骼',
+    '成對附肢',
+    '身體扁平',
+  ],
+  海邊分節小動物: [
+    '身體分節',
+    '環狀體節',
+    '身體細長',
+    '海水中生活',
+    '無體節',
+    '外骨骼',
+    '成對附肢',
+    '棘皮',
+  ],
+
+  蝴蝶: [
+    '外骨骼',
+    '身體分節',
+    '成對附肢',
+    '附肢有關節',
+    '多數有殼',
+    '外表有殼或硬殼',
+    '柔軟身體',
+    '觸手',
+  ],
+  蜘蛛: [
+    '外骨骼',
+    '身體分節',
+    '成對附肢',
+    '附肢有關節',
+    '多數有殼',
+    '外表有殼或硬殼',
+    '柔軟身體',
+    '觸手',
+  ],
+  螃蟹: [
+    '外骨骼',
+    '身體分節',
+    '成對附肢',
+    '附肢有關節',
+    '外表有殼或硬殼',
+    '海水中生活',
+    '多數有殼',
+    '肌肉足',
+  ],
+  蝦子: [
+    '外骨骼',
+    '身體分節',
+    '成對附肢',
+    '附肢有關節',
+    '外表有殼或硬殼',
+    '水中生活',
+    '海水中生活',
+    '肌肉足',
+  ],
+
+  海星: [
+    '棘皮',
+    '管足',
+    '成體輻射對稱',
+    '五輻對稱特徵',
+    '海水中生活',
+    '外骨骼',
+    '身體分節',
+    '成對附肢',
+  ],
+  海膽: [
+    '棘皮',
+    '管足',
+    '成體輻射對稱',
+    '五輻對稱特徵',
+    '海水中生活',
+    '外表有殼或硬殼',
+    '外骨骼',
+    '成對附肢',
+  ],
+  海參: [
+    '棘皮',
+    '管足',
+    '成體輻射對稱',
+    '海水中生活',
+    '身體細長',
+    '身體分節',
+    '環狀體節',
+    '柔軟身體',
+  ],
+}
+
+const CORE_FEATURES = [
+  '刺絲胞',
+  '觸手',
+  '輻射對稱',
+  '袋狀身體',
+  '身體扁平',
+  '左右對稱',
+  '無體節',
+  '外套膜',
+  '肌肉足',
+  '柔軟身體',
+  '身體分節',
+  '環狀體節',
+  '外骨骼',
+  '成對附肢',
+  '附肢有關節',
+  '棘皮',
+  '管足',
+  '成體輻射對稱',
+  '五輻對稱特徵',
+] as const
+
+const SUPPORTING_OR_MISLEADING_FEATURES = [
+  '多數有殼',
+  '外表有殼或硬殼',
+  '身體細長',
+  '固著生活',
+  '水中生活',
+  '海水中生活',
+  '寄生生活',
+] as const
+
+const FEATURE_BANK = [
+  ...CORE_FEATURES,
+  ...SUPPORTING_OR_MISLEADING_FEATURES,
+]
 
 const ALLOW_POST_FEEDBACK_RETRY = false
 
-const STRUCTURAL_FEATURE_SET = new Set(PHYLUM_GUIDE.flatMap((guide) => guide.keyFeatures))
-const SURFACE_FEATURE_SET = new Set(PHYLUM_GUIDE.flatMap((guide) => guide.unstableClues))
+const STRUCTURAL_FEATURE_SET = new Set<string>(CORE_FEATURES)
+const SURFACE_FEATURE_SET = new Set<string>(SUPPORTING_OR_MISLEADING_FEATURES)
 
 function getCueProfile(features: string[]) {
   if (!features.length) {
@@ -613,6 +865,13 @@ function inferAnimalName(question: {
   const text = `${question.prompt ?? ''} ${question.stimulusText ?? ''} ${question.id ?? ''}`
   const animals = Object.keys(ANIMAL_RULES)
   return animals.find((animal) => text.includes(animal)) ?? `題目-${question.id ?? 'unknown'}`
+}
+
+function getQuestionFeatureOptions(question: QuestionLike | null | undefined) {
+  if (!question) return FEATURE_BANK
+
+  const animalName = inferAnimalName(question)
+  return ANIMAL_FEATURE_OPTIONS[animalName] ?? FEATURE_BANK
 }
 
 function moveCardBetweenContainers(params: {
@@ -792,38 +1051,94 @@ function StepHeader({
 }
 
 function FeatureCheckboxes({
+  options,
   selected,
   onChange,
+  maxSelected,
 }: {
+  options: string[]
   selected: string[]
   onChange: (next: string[]) => void
+  maxSelected?: number
 }) {
-  return (
-    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-      {FEATURE_BANK.map((feature) => {
-        const checked = selected.includes(feature)
+  const coreOptions = options.filter((feature) => STRUCTURAL_FEATURE_SET.has(feature))
+  const supportingOptions = options.filter((feature) => SURFACE_FEATURE_SET.has(feature))
+  const otherOptions = options.filter(
+    (feature) => !STRUCTURAL_FEATURE_SET.has(feature) && !SURFACE_FEATURE_SET.has(feature)
+  )
 
-        return (
-          <label
-            key={feature}
-            className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm"
-          >
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  onChange([...selected, feature])
-                } else {
-                  onChange(selected.filter((item) => item !== feature))
-                }
-              }}
-              className="mt-1"
-            />
-            <span>{feature}</span>
-          </label>
-        )
-      })}
+  function renderOption(feature: string) {
+    const checked = selected.includes(feature)
+    const reachedLimit = maxSelected != null && selected.length >= maxSelected
+    const disabled = !checked && reachedLimit
+
+    return (
+      <label
+        key={feature}
+        className={`flex items-start gap-2 rounded-lg border p-2 text-sm ${
+          checked
+            ? 'border-black bg-gray-50'
+            : disabled
+              ? 'border-gray-200 bg-gray-100 text-gray-400'
+              : 'border-gray-200 bg-white text-gray-800'
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => {
+            if (e.target.checked) {
+              if (maxSelected != null && selected.length >= maxSelected) return
+              onChange([...selected, feature])
+            } else {
+              onChange(selected.filter((item) => item !== feature))
+            }
+          }}
+          className="mt-1"
+        />
+        <span>{feature}</span>
+      </label>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {maxSelected != null ? (
+        <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+          請選出最主要的判斷依據，最多選 {maxSelected} 項。
+          目前已選 {selected.length} / {maxSelected} 項。
+        </div>
+      ) : null}
+
+      {coreOptions.length > 0 ? (
+        <div>
+          <div className="mb-2 text-sm font-bold text-gray-800">核心結構特徵</div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {coreOptions.map(renderOption)}
+          </div>
+        </div>
+      ) : null}
+
+      {supportingOptions.length > 0 ? (
+        <div>
+          <div className="mb-2 text-sm font-bold text-gray-800">
+            輔助或容易誤用的線索
+          </div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {supportingOptions.map(renderOption)}
+          </div>
+        </div>
+      ) : null}
+
+      {otherOptions.length > 0 ? (
+        <div>
+          <div className="mb-2 text-sm font-bold text-gray-800">其他線索</div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {otherOptions.map(renderOption)}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -970,21 +1285,85 @@ function SummaryBlock({
   )
 }
 
-function GuideCardView({ guide }: { guide: GuideCard }) {
-  return (
-    <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-      <div className="mb-2 text-lg font-black text-gray-900">{guide.phylum}</div>
-      <div className="mb-1 text-sm text-gray-700">代表生物：{guide.examples.join('、')}</div>
+function getGuideExampleCards(guide: GuideCard) {
+  return guide.examples.flatMap((name) => {
+    const card = stage1Cards.find((item) => item.name === name)
+    return card ? [card] : []
+  })
+}
 
-      <div className="mb-2 mt-3 text-sm font-semibold text-gray-700">通常先看的關鍵特徵</div>
-      <ul className="list-disc space-y-1 pl-5 text-sm text-gray-800">
+function GuideCardView({
+  guide,
+  compact = false,
+}: {
+  guide: GuideCard
+  compact?: boolean
+}) {
+  const exampleCards = getGuideExampleCards(guide)
+  const imageHeightClass = compact ? 'h-24 sm:h-28' : 'h-32 sm:h-40'
+  const titleClass = compact ? 'text-base' : 'text-lg'
+  const cardPaddingClass = compact ? 'p-3' : 'p-4'
+
+  return (
+    <div className={`rounded-2xl border border-blue-200 bg-blue-50 ${cardPaddingClass}`}>
+      <div className={`mb-2 font-black text-gray-900 ${titleClass}`}>
+        {guide.phylum}
+      </div>
+
+      <div className="mb-3 text-sm text-gray-700">
+        代表生物：{guide.examples.join('、')}
+      </div>
+
+      {exampleCards.length > 0 ? (
+        <div className="mb-4 grid grid-cols-2 gap-2">
+          {exampleCards.map((card) => (
+            <div
+              key={card.id}
+              className="overflow-hidden rounded-xl border border-blue-100 bg-white p-2"
+            >
+              <div className={`${imageHeightClass} w-full`}>
+                <img
+                  src={card.imageUrl}
+                  alt={`${guide.phylum}代表生物：${card.name}`}
+                  className="h-full w-full object-contain"
+                  draggable={false}
+                />
+              </div>
+
+              <div className="mt-2 text-center text-xs font-bold leading-5 text-gray-800">
+                {card.name}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+          目前沒有找到代表生物圖片。請確認 PHYLUM_GUIDE 的 examples 名稱是否和 stage1Cards 的生物名稱完全一致。
+        </div>
+      )}
+
+      <div className="mb-2 mt-3 text-sm font-semibold text-gray-700">
+        先觀察圖片中的哪些地方？
+      </div>
+      <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-gray-800">
+        {guide.observePrompts.map((prompt) => (
+          <li key={prompt}>{prompt}</li>
+        ))}
+      </ul>
+
+      <div className="mb-2 mt-4 text-sm font-semibold text-gray-700">
+        通常先看的關鍵特徵
+      </div>
+      <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-gray-800">
         {guide.keyFeatures.map((feature) => (
           <li key={feature}>{feature}</li>
         ))}
       </ul>
 
-      <div className="mb-2 mt-4 text-sm font-semibold text-gray-700">容易誤用的線索</div>
-      <ul className="list-disc space-y-1 pl-5 text-sm text-gray-800">
+      <div className="mb-2 mt-4 text-sm font-semibold text-gray-700">
+        容易誤用的線索
+      </div>
+      <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-gray-800">
         {guide.unstableClues.map((feature) => (
           <li key={feature}>{feature}</li>
         ))}
@@ -1054,6 +1433,16 @@ export default function Page() {
 
   const currentEvidence = stage3EvidenceQuestions[evidenceIndex]
   const currentTransfer = transferQuestions[transferIndex]
+
+  const currentEvidenceFeatureOptions = useMemo(
+  () => getQuestionFeatureOptions(currentEvidence as QuestionLike),
+  [currentEvidence?.id]
+)
+
+const currentTransferFeatureOptions = useMemo(
+  () => getQuestionFeatureOptions(currentTransfer),
+  [currentTransfer?.id]
+)
 
   const isDev = process.env.NODE_ENV === 'development'
 
@@ -1668,6 +2057,11 @@ const stage5ReviewPhyla = useMemo(() => {
       return null
     }
 
+    if (evidenceSelectedFeatures.length > 3) {
+  window.alert('第 3 階段最多只能選 3 個主要判斷特徵。')
+  return null
+}
+
     if (evidenceReasonText.trim().length < 8) {
       window.alert('請至少寫 8 個字，簡短說明判斷理由。')
       return null
@@ -1753,6 +2147,11 @@ const stage5ReviewPhyla = useMemo(() => {
       window.alert('請先至少勾選一個判斷特徵。')
       return null
     }
+
+    if (transferSelectedFeatures.length > 2) {
+  window.alert('第 4 階段最多只能選 2 個主要判斷特徵。')
+  return null
+}
 
     if (transferReasonText.trim().length < 8) {
       window.alert('請至少寫 8 個字，簡短說明判斷理由。')
@@ -2941,14 +3340,18 @@ const stage5ReviewPhyla = useMemo(() => {
 />
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                  <div className="mb-3 text-lg font-black">先勾選你判斷時最主要依據的特徵（可複選）</div>
-                  <div className="mb-2 text-sm text-gray-600">
-                    先想你看到了哪些特徵，再根據特徵推論門別。
-                  </div>
+                  <div className="mb-3 text-lg font-black">
+  先勾選你判斷時最主要依據的特徵
+</div>
+<div className="mb-2 text-sm text-gray-600">
+  請從本題提供的少量線索中，選出最能支持分類判斷的 1–3 項。
+</div>
                   <FeatureCheckboxes
-                    selected={evidenceSelectedFeatures}
-                    onChange={setEvidenceSelectedFeatures}
-                  />
+  options={currentEvidenceFeatureOptions}
+  selected={evidenceSelectedFeatures}
+  onChange={setEvidenceSelectedFeatures}
+  maxSelected={3}
+/>
 
                   <div className="mb-2 mt-5 text-lg font-black">再簡短說明理由</div>
                   <div className="mb-2 text-sm text-gray-600">
@@ -3044,8 +3447,8 @@ const stage5ReviewPhyla = useMemo(() => {
                 </div>
 
                 {PHYLUM_GUIDE.map((guide) => (
-                  <GuideCardView key={guide.phylum} guide={guide} />
-                ))}
+  <GuideCardView key={guide.phylum} guide={guide} compact />
+))}
               </aside>
             </section>
           )}
@@ -3093,14 +3496,18 @@ const stage5ReviewPhyla = useMemo(() => {
 />
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                  <div className="mb-3 text-lg font-black">先勾選你判斷時最主要依據的特徵（可複選）</div>
-                  <div className="mb-2 text-sm text-gray-600">
-                    這一階段請盡量根據你前面學到的分類判準來判斷，不再提供完整提示卡。
-                  </div>
+                  <div className="mb-3 text-lg font-black">
+  先勾選你判斷時最主要依據的特徵
+</div>
+<div className="mb-2 text-sm text-gray-600">
+  這一階段請回想前面學到的分類判準，從本題線索中選出最關鍵的 1–2 項。
+</div>
                   <FeatureCheckboxes
-                    selected={transferSelectedFeatures}
-                    onChange={setTransferSelectedFeatures}
-                  />
+  options={currentTransferFeatureOptions}
+  selected={transferSelectedFeatures}
+  onChange={setTransferSelectedFeatures}
+  maxSelected={2}
+/>
 
                   <div className="mb-2 mt-5 text-lg font-black">再簡短說明理由</div>
                   <div className="mb-2 text-sm text-gray-600">
