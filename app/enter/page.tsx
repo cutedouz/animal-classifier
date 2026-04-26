@@ -35,6 +35,53 @@ type LookupResult = {
 
 type EntryMode = 'roster' | 'manual'
 
+type UserRole =
+  | '國中學生'
+  | '國小學生'
+  | '高中學生'
+  | '生物科教師'
+  | '其他科教師'
+  | '家長'
+  | '其他'
+
+type UseContext =
+  | '正式課堂學習'
+  | '課後或自主學習'
+  | '教師研習／備課體驗'
+  | '家長或一般體驗'
+  | '測試系統'
+
+type AnimalClassificationExperience =
+  | '尚未學過'
+  | '正在學習中'
+  | '已經學過'
+  | '不確定'
+
+const USER_ROLE_OPTIONS: UserRole[] = [
+  '國中學生',
+  '國小學生',
+  '高中學生',
+  '生物科教師',
+  '其他科教師',
+  '家長',
+  '其他',
+]
+
+const USE_CONTEXT_OPTIONS: UseContext[] = [
+  '正式課堂學習',
+  '課後或自主學習',
+  '教師研習／備課體驗',
+  '家長或一般體驗',
+  '測試系統',
+]
+
+const ANIMAL_CLASSIFICATION_EXPERIENCE_OPTIONS: AnimalClassificationExperience[] = [
+  '尚未學過',
+  '正在學習中',
+  '已經學過',
+  '不確定',
+]
+
 type SchoolOption = {
   value: string
   label: string
@@ -95,6 +142,11 @@ export default function EnterPage() {
   const [manualClassName, setManualClassName] = useState('')
   const [manualSeatNo, setManualSeatNo] = useState('')
   const [manualName, setManualName] = useState('')
+
+  const [userRole, setUserRole] = useState<UserRole | ''>('國中學生')
+  const [useContext, setUseContext] = useState<UseContext | ''>('正式課堂學習')
+  const [animalClassificationExperience, setAnimalClassificationExperience] =
+  useState<AnimalClassificationExperience | ''>('')
 
   const [lookupError, setLookupError] = useState('')
   const [matchedStudent, setMatchedStudent] = useState<LookupResult | null>(null)
@@ -273,11 +325,21 @@ export default function EnterPage() {
   }
 
   function handleModeChange(nextMode: EntryMode) {
-    setEntryMode(nextMode)
-    setLookupError('')
-    setMatchedStudent(null)
-    setEnterPassword('')
+  setEntryMode(nextMode)
+  setLookupError('')
+  setMatchedStudent(null)
+  setEnterPassword('')
+
+  if (nextMode === 'roster') {
+    setUserRole('國中學生')
+    setUseContext('正式課堂學習')
+  } else {
+    setUserRole('')
+    setUseContext('')
   }
+
+  setAnimalClassificationExperience('')
+}
 
   function handleSchoolChange(nextSchoolCode: string) {
     setSchoolCode(nextSchoolCode)
@@ -292,10 +354,40 @@ export default function EnterPage() {
     resetLookupState()
   }
 
-  function handleSeatChange(nextSeatNo: string) {
-    setSeatNo(nextSeatNo)
-    resetLookupState()
+  function handleSeatChange(value: string) {
+  setSeatNo(value)
+  setMatchedStudent(null)
+  setEnterPassword('')
+}
+
+function getResearchBackground(mode: EntryMode) {
+  return {
+    userRole: mode === 'roster' ? '國中學生' : userRole,
+    useContext: mode === 'roster' ? '正式課堂學習' : useContext,
+    animalClassificationExperience,
   }
+}
+
+function validateResearchBackground(mode: EntryMode) {
+  const background = getResearchBackground(mode)
+
+  if (!background.userRole) {
+    setLookupError('請選擇使用者身分。')
+    return null
+  }
+
+  if (!background.useContext) {
+    setLookupError('請選擇本次使用情境。')
+    return null
+  }
+
+  if (!background.animalClassificationExperience) {
+    setLookupError('請選擇是否已學過動物界分類單元。')
+    return null
+  }
+
+  return background
+}
 
   async function handleLookup() {
     resetLookupState()
@@ -351,23 +443,33 @@ export default function EnterPage() {
     mode: EntryMode,
     schoolDisplayName?: string
   ) {
-    setLookupError('')
-    setIsEntering(true)
+  setLookupError('')
 
-    try {
+  const researchBackground = validateResearchBackground(mode)
+  if (!researchBackground) return
+
+  setIsEntering(true)
+
+  try {
       const entrySession = {
-        studentId: base.studentId,
-        schoolCode: base.schoolCode,
-        schoolDisplayName: schoolDisplayName ?? '',
-        schoolYear: base.schoolYear,
-        semester: base.semester,
-        grade: base.grade,
-        className: base.className,
-        seatNo: base.seatNo,
-        maskedName: base.maskedName,
-        entryMode: mode,
-        enteredAt: new Date().toISOString(),
-      }
+      studentId: base.studentId,
+      schoolCode: base.schoolCode,
+      schoolDisplayName: schoolDisplayName ?? '',
+      schoolYear: base.schoolYear,
+      semester: base.semester,
+      grade: base.grade,
+      className: base.className,
+      seatNo: base.seatNo,
+      maskedName: base.maskedName,
+      entryMode: mode,
+
+      userRole: researchBackground.userRole,
+      useContext: researchBackground.useContext,
+      animalClassificationExperience:
+        researchBackground.animalClassificationExperience,
+
+      enteredAt: new Date().toISOString(),
+    }
 
       localStorage.setItem(
         'animal-classifier-enter-session',
@@ -375,15 +477,19 @@ export default function EnterPage() {
       )
 
       const params = new URLSearchParams({
-        studentId: base.studentId,
-        schoolCode: base.schoolCode,
-        schoolYear: base.schoolYear,
-        semester: base.semester,
-        grade: base.grade,
-        className: base.className,
-        seatNo: base.seatNo,
-        entryMode: mode,
-      })
+  studentId: base.studentId,
+  schoolCode: base.schoolCode,
+  schoolYear: base.schoolYear,
+  semester: base.semester,
+  grade: base.grade,
+  className: base.className,
+  seatNo: base.seatNo,
+  entryMode: mode,
+  userRole: researchBackground.userRole,
+  useContext: researchBackground.useContext,
+  animalClassificationExperience:
+    researchBackground.animalClassificationExperience,
+})
 
       router.push(`${TARGET_PATH}?${params.toString()}`)
     } catch (error) {
@@ -627,6 +733,37 @@ export default function EnterPage() {
                   若正確，請輸入密碼後再進入第一階段。
                 </div>
 
+                <div className="mb-4 rounded-xl border border-[#dfe8df] bg-white px-4 py-3">
+  <div className="mb-2 text-sm font-bold text-[#234a2c]">
+    研究背景資料
+  </div>
+
+  <div className="mb-3 rounded-lg bg-[#f3f6f2] px-3 py-2 text-xs leading-5 text-[#667266]">
+    正式參與將記錄為「國中學生」與「正式課堂學習」。請再選擇你目前對動物界分類單元的學習經驗。
+  </div>
+
+  <label className="mb-1 block text-sm font-semibold text-[#425142]">
+    動物界分類單元學習經驗
+  </label>
+  <select
+    value={animalClassificationExperience}
+    onChange={(e) => {
+      setAnimalClassificationExperience(
+        e.target.value as AnimalClassificationExperience | ''
+      )
+      setLookupError('')
+    }}
+    className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+  >
+    <option value="">請選擇</option>
+    {ANIMAL_CLASSIFICATION_EXPERIENCE_OPTIONS.map((option) => (
+      <option key={option} value={option}>
+        {option}
+      </option>
+    ))}
+  </select>
+</div>
+
                 <div className="mt-4">
                   <label className="mb-1 block text-sm font-semibold text-[#425142]">
                     密碼
@@ -645,13 +782,13 @@ export default function EnterPage() {
 
                 <div className="mt-4 flex gap-3">
                   <button
-                    type="button"
-                    onClick={handleOfficialEnter}
-                    disabled={isEntering}
-                    className="rounded-xl bg-[#234a2c] px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isEntering ? '進入中…' : '是，進入第一階段'}
-                  </button>
+  type="button"
+  onClick={handleOfficialEnter}
+  disabled={isEntering || !animalClassificationExperience}
+  className="rounded-xl bg-[#234a2c] px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+>
+  {isEntering ? '進入中…' : '是，進入第一階段'}
+</button>
 
                   <button
                     type="button"
@@ -672,6 +809,79 @@ export default function EnterPage() {
             <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900">
               課程體驗：若不在正式名單中，可自行填寫學校、班級、姓名後進入。
             </div>
+
+            <div className="mb-4 rounded-xl border border-[#dfe8df] bg-white px-4 py-3">
+  <div className="mb-3 text-sm font-bold text-[#234a2c]">
+    體驗者背景資料
+  </div>
+
+  <div className="space-y-3">
+    <div>
+      <label className="mb-1 block text-sm font-semibold text-[#425142]">
+        使用者身分
+      </label>
+      <select
+        value={userRole}
+        onChange={(e) => {
+          setUserRole(e.target.value as UserRole | '')
+          setLookupError('')
+        }}
+        className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+      >
+        <option value="">請選擇</option>
+        {USER_ROLE_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+
+    <div>
+      <label className="mb-1 block text-sm font-semibold text-[#425142]">
+        本次使用情境
+      </label>
+      <select
+        value={useContext}
+        onChange={(e) => {
+          setUseContext(e.target.value as UseContext | '')
+          setLookupError('')
+        }}
+        className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+      >
+        <option value="">請選擇</option>
+        {USE_CONTEXT_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+
+    <div>
+      <label className="mb-1 block text-sm font-semibold text-[#425142]">
+        動物界分類單元學習經驗
+      </label>
+      <select
+        value={animalClassificationExperience}
+        onChange={(e) => {
+          setAnimalClassificationExperience(
+            e.target.value as AnimalClassificationExperience | ''
+          )
+          setLookupError('')
+        }}
+        className="w-full rounded-xl border border-[#ccd5cc] px-3 py-2 text-sm"
+      >
+        <option value="">請選擇</option>
+        {ANIMAL_CLASSIFICATION_EXPERIENCE_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+  </div>
+</div>
 
             <div className="space-y-4">
               <div>
@@ -741,11 +951,14 @@ export default function EnterPage() {
                   type="button"
                   onClick={handleTrialEnter}
                   disabled={
-                    isEntering ||
-                    !manualSchoolName.trim() ||
-                    !manualClassName.trim() ||
-                    !manualName.trim()
-                  }
+  isEntering ||
+  !manualSchoolName.trim() ||
+  !manualClassName.trim() ||
+  !manualName.trim() ||
+  !userRole ||
+  !useContext ||
+  !animalClassificationExperience
+}
                   className="rounded-xl bg-[#234a2c] px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isEntering ? '進入中…' : '直接進入第一階段'}

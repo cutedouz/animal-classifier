@@ -65,6 +65,9 @@ type EnterSession = {
   seatNo: string
   maskedName?: string
   enteredAt?: string
+  userRole?: string
+  useContext?: string
+  animalClassificationExperience?: string
 }
 
 type GuideCard = {
