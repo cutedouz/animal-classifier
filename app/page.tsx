@@ -249,12 +249,12 @@ const PHYLUM_GUIDE: GuideCard[] = [
     examples: ['海膽', '海星'],
     observePrompts: [
       '先看體表是否有棘狀或粗糙構造。',
-      '觀察成體是否常呈五輻對稱。',
       '注意是否具有棘皮動物特有的管足構造。',
+      '若看得到身體排列方式，可再觀察成體是否呈輻射對稱。',
     ],
-    keyFeatures: ['棘皮', '管足', '成體多為五輻對稱'],
-    unstableClues: ['固著不動', '有外骨骼', '外型像星星'],
-    teacherTip: '重點不是像不像星星，而是棘皮、管足與成體五輻對稱等構造。',
+    keyFeatures: ['棘皮', '管足', '成體輻射對稱'],
+    unstableClues: ['海水中生活', '外表有殼或硬殼'],
+    teacherTip: '重點是棘皮與管足。海水中生活可以輔助判斷，但不能單獨決定門別。',
   },
 ]
 
@@ -277,7 +277,7 @@ const READINESS_CHECKS: ReadinessCheck[] = [
     options: [
       '身體扁平、左右對稱、無體節',
       '外骨骼、身體分節、成對附肢',
-      '棘皮、管足、五輻對稱',
+      '棘皮、管足、成體輻射對稱',
     ],
     correct: '身體扁平、左右對稱、無體節',
   },
@@ -299,7 +299,7 @@ const READINESS_CHECKS: ReadinessCheck[] = [
     options: [
       '環狀體節、身體分節',
       '外骨骼、成對附肢',
-      '棘皮、五輻對稱',
+      '棘皮、成體輻射對稱',
     ],
     correct: '環狀體節、身體分節',
   },
@@ -319,11 +319,11 @@ const READINESS_CHECKS: ReadinessCheck[] = [
     phylum: '棘皮動物門',
     question: '哪一組最能代表棘皮動物門？',
     options: [
-      '棘皮、管足、成體多為五輻對稱',
+      '棘皮、管足、成體多為輻射對稱',
       '刺絲胞、觸手',
       '外骨骼、成對附肢',
     ],
-    correct: '棘皮、管足、成體多為五輻對稱',
+    correct: '棘皮、管足、成體多為輻射對稱',
   },
 ]
 
@@ -398,13 +398,13 @@ const ANIMAL_RULES: Record<
   },
   海膽: {
     phylum: '棘皮動物門',
-    keyFeatures: ['棘皮', '管足', '五輻對稱'],
-    feedback: '海膽的重點不是球形，而是棘皮動物的身體結構。',
+    keyFeatures: ['棘皮', '管足', '成體輻射對稱'],
+    feedback: '海膽的重點不是球形，也不是只看生活在海中，而是棘皮、管足與成體輻射對稱等構造。',
   },
   海星: {
     phylum: '棘皮動物門',
-    keyFeatures: ['棘皮', '管足', '五輻對稱'],
-    feedback: '海星常見五輻對稱，是棘皮動物門的重要線索。',
+    keyFeatures: ['棘皮', '管足', '成體輻射對稱'],
+    feedback: '海星屬棘皮動物門，判斷時應看棘皮、管足與成體輻射對稱等構造。',
   },
   蝴蝶: {
     phylum: '節肢動物門',
@@ -458,9 +458,9 @@ const ANIMAL_RULES: Record<
   },
   中華槍烏賊: {
     phylum: '軟體動物門',
-    keyFeatures: ['外套膜', '柔軟身體', '頭足類腕足'],
+    keyFeatures: ['外套膜', '身體柔軟', '肌肉足'],
     feedback:
-      '中華槍烏賊屬軟體動物門，雖然外形和蝦、魚差很多，但判斷重點仍是外套膜與頭足類構造。',
+      '中華槍烏賊屬軟體動物門，雖然外形和蝦、魚差很多，但判斷重點仍是外套膜、肌肉足與柔軟身體等構造。',
   },
   海邊分節小動物: {
     phylum: '環節動物門',
@@ -474,8 +474,8 @@ const ANIMAL_RULES: Record<
   },
   海參: {
     phylum: '棘皮動物門',
-    keyFeatures: ['棘皮', '管足', '棘皮動物特徵'],
-    feedback: '海參雖不像海星，但仍屬棘皮動物門，不能只憑外型判斷。',
+    keyFeatures: ['棘皮', '管足'],
+    feedback: '海參雖不像海星，也不容易直接從外形看出輻射對稱，但仍屬棘皮動物門。判斷時應回到棘皮與管足等構造，不要只憑細長外型判斷。',
   },
 }
 
@@ -496,7 +496,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '輻射對稱',
     '袋狀身體',
     '水中生活',
-    '柔軟身體',
+    '身體柔軟',
     '左右對稱',
     '外骨骼',
   ],
@@ -515,7 +515,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '身體扁平',
     '左右對稱',
     '無體節',
-    '柔軟身體',
+    '身體柔軟',
     '身體細長',
     '身體分節',
     '環狀體節',
@@ -535,7 +535,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
   蛤蠣: [
     '外套膜',
     '肌肉足',
-    '柔軟身體',
+    '身體柔軟',
     '多數有殼',
     '外表有殼或硬殼',
     '外骨骼',
@@ -545,7 +545,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
   蝸牛: [
     '外套膜',
     '肌肉足',
-    '柔軟身體',
+    '身體柔軟',
     '多數有殼',
     '外表有殼或硬殼',
     '身體分節',
@@ -555,7 +555,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
   中華槍烏賊: [
     '外套膜',
     '肌肉足',
-    '柔軟身體',
+    '身體柔軟',
     '觸手',
     '多數有殼',
     '外骨骼',
@@ -567,7 +567,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '身體分節',
     '環狀體節',
     '身體細長',
-    '柔軟身體',
+    '身體柔軟',
     '無體節',
     '外骨骼',
     '成對附肢',
@@ -577,7 +577,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '身體分節',
     '環狀體節',
     '身體細長',
-    '柔軟身體',
+    '身體柔軟',
     '無體節',
     '外骨骼',
     '成對附肢',
@@ -601,7 +601,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '附肢有關節',
     '多數有殼',
     '外表有殼或硬殼',
-    '柔軟身體',
+    '身體柔軟',
     '觸手',
   ],
   蜘蛛: [
@@ -611,7 +611,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '附肢有關節',
     '多數有殼',
     '外表有殼或硬殼',
-    '柔軟身體',
+    '身體柔軟',
     '觸手',
   ],
   螃蟹: [
@@ -639,7 +639,6 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '棘皮',
     '管足',
     '成體輻射對稱',
-    '五輻對稱特徵',
     '海水中生活',
     '外骨骼',
     '身體分節',
@@ -649,7 +648,6 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '棘皮',
     '管足',
     '成體輻射對稱',
-    '五輻對稱特徵',
     '海水中生活',
     '外表有殼或硬殼',
     '外骨骼',
@@ -663,7 +661,7 @@ const ANIMAL_FEATURE_OPTIONS: Record<string, string[]> = {
     '身體細長',
     '身體分節',
     '環狀體節',
-    '柔軟身體',
+    '身體柔軟',
   ],
 }
 
@@ -677,7 +675,7 @@ const CORE_FEATURES = [
   '無體節',
   '外套膜',
   '肌肉足',
-  '柔軟身體',
+  '身體柔軟',
   '身體分節',
   '環狀體節',
   '外骨骼',
@@ -686,7 +684,6 @@ const CORE_FEATURES = [
   '棘皮',
   '管足',
   '成體輻射對稱',
-  '五輻對稱特徵',
 ] as const
 
 const SUPPORTING_OR_MISLEADING_FEATURES = [
