@@ -35,6 +35,15 @@ type LearningItemLogRow = {
   reason_char_count: number | null
   confidence: number | null
   is_correct: boolean | null
+  primaryHitCount?: number
+  acceptableHitCount?: number
+  supportingHitCount?: number
+  misleadingHitCount?: number
+  selectedPrimaryFeatures?: string[]
+  selectedAcceptableFeatures?: string[]
+  selectedSupportingFeatures?: string[]
+  selectedMisleadingFeatures?: string[]
+  featureQuality?: 'high' | 'partial' | 'surface_or_misleading' | 'unclear'
 }
 
 type LearningEventLogRow = {
@@ -197,6 +206,14 @@ type DashboardResponse = {
   questionMetrics: QuestionMetric[]
   featureMetrics: FeatureMetric[]
   misconceptionMetrics: MisconceptionMetric[]
+  featureQualitySummary: {
+    high: number
+    partial: number
+    surfaceOrMisleading: number
+    unclear: number
+  }
+  averagePrimaryHitCount: number
+  averageMisleadingHitCount: number
   insightCards: InsightCard[]
   counts: {
     records: number
@@ -235,6 +252,129 @@ const SURFACE_FEATURES = new Set([
   '海水中生活',
   '寄生生活',
 ])
+
+type FeatureRubric = {
+  primary: string[]
+  acceptable: string[]
+  supporting: string[]
+  misleading: string[]
+}
+
+const QUESTION_FEATURE_RUBRICS: Record<string, FeatureRubric> = {
+  海葵: {
+    primary: ['刺絲胞', '觸手'],
+    acceptable: ['輻射對稱', '袋狀身體'],
+    supporting: ['固著生活', '水中生活'],
+    misleading: ['外表有殼或硬殼', '左右對稱'],
+  },
+  水母: {
+    primary: ['刺絲胞', '觸手'],
+    acceptable: ['輻射對稱', '袋狀身體'],
+    supporting: ['水中生活', '身體柔軟'],
+    misleading: ['外骨骼', '左右對稱'],
+  },
+  珊瑚: {
+    primary: ['刺絲胞', '觸手'],
+    acceptable: ['輻射對稱', '袋狀身體'],
+    supporting: ['固著生活', '水中生活'],
+    misleading: ['外表有殼或硬殼', '左右對稱'],
+  },
+
+  渦蟲: {
+    primary: ['身體扁平', '無體節'],
+    acceptable: ['左右對稱'],
+    supporting: ['身體細長', '身體柔軟'],
+    misleading: ['身體分節', '環狀體節', '寄生生活'],
+  },
+  中華肝吸蟲: {
+    primary: ['身體扁平', '無體節'],
+    acceptable: ['左右對稱'],
+    supporting: ['寄生生活', '身體細長'],
+    misleading: ['身體分節', '環狀體節', '外骨骼'],
+  },
+
+  蛤蠣: {
+    primary: ['外套膜', '肌肉足'],
+    acceptable: ['身體柔軟'],
+    supporting: ['多數有殼', '外表有殼或硬殼'],
+    misleading: ['外骨骼', '身體分節', '成對附肢'],
+  },
+  蝸牛: {
+    primary: ['外套膜', '肌肉足'],
+    acceptable: ['身體柔軟'],
+    supporting: ['多數有殼', '外表有殼或硬殼'],
+    misleading: ['外骨骼', '身體分節', '成對附肢'],
+  },
+  中華槍烏賊: {
+    primary: ['外套膜', '身體柔軟'],
+    acceptable: ['肌肉足'],
+    supporting: ['水中生活'],
+    misleading: ['觸手', '外骨骼', '成對附肢', '多數有殼'],
+  },
+
+  蚯蚓: {
+    primary: ['身體分節', '環狀體節'],
+    acceptable: ['身體細長'],
+    supporting: ['身體柔軟'],
+    misleading: ['無體節', '外骨骼', '成對附肢', '身體扁平'],
+  },
+  水蛭: {
+    primary: ['身體分節', '環狀體節'],
+    acceptable: ['身體細長'],
+    supporting: ['身體柔軟'],
+    misleading: ['無體節', '外骨骼', '成對附肢', '身體扁平'],
+  },
+  海邊分節小動物: {
+    primary: ['身體分節', '環狀體節'],
+    acceptable: ['身體細長'],
+    supporting: ['海水中生活'],
+    misleading: ['無體節', '外骨骼', '成對附肢', '棘皮'],
+  },
+
+  蝴蝶: {
+    primary: ['外骨骼', '附肢有關節'],
+    acceptable: ['身體分節', '成對附肢'],
+    supporting: [],
+    misleading: ['多數有殼', '外表有殼或硬殼', '身體柔軟', '觸手'],
+  },
+  蜘蛛: {
+    primary: ['外骨骼', '附肢有關節'],
+    acceptable: ['身體分節', '成對附肢'],
+    supporting: [],
+    misleading: ['多數有殼', '外表有殼或硬殼', '身體柔軟', '觸手'],
+  },
+  螃蟹: {
+    primary: ['外骨骼', '附肢有關節'],
+    acceptable: ['身體分節', '成對附肢'],
+    supporting: ['海水中生活', '外表有殼或硬殼'],
+    misleading: ['多數有殼', '肌肉足'],
+  },
+  蝦子: {
+    primary: ['外骨骼', '附肢有關節'],
+    acceptable: ['身體分節', '成對附肢'],
+    supporting: ['水中生活', '海水中生活', '外表有殼或硬殼'],
+    misleading: ['多數有殼', '肌肉足'],
+  },
+
+  海星: {
+    primary: ['棘皮', '管足'],
+    acceptable: ['成體輻射對稱'],
+    supporting: ['海水中生活'],
+    misleading: ['外骨骼', '身體分節', '成對附肢'],
+  },
+  海膽: {
+    primary: ['棘皮', '管足'],
+    acceptable: ['成體輻射對稱'],
+    supporting: ['海水中生活', '外表有殼或硬殼'],
+    misleading: ['外骨骼', '成對附肢'],
+  },
+  海參: {
+    primary: ['棘皮', '管足'],
+    acceptable: [],
+    supporting: ['海水中生活'],
+    misleading: ['身體細長', '身體分節', '環狀體節', '身體柔軟'],
+  },
+}
 
 const STAGE_KEYS = ['stage1', 'awareness', 'evidence', 'transfer', 'done']
 
@@ -304,6 +444,81 @@ function normalizeFeatureName(feature: unknown) {
 
 function normalizeFeatures(features: unknown[]) {
   return features.map(normalizeFeatureName).filter(Boolean)
+}
+
+function getFeatureRubric(animalName: string): FeatureRubric {
+  return (
+    QUESTION_FEATURE_RUBRICS[animalName] ?? {
+      primary: [],
+      acceptable: [],
+      supporting: [],
+      misleading: [],
+    }
+  )
+}
+
+function analyzeSelectedFeatureQuality(animalName: string, selectedFeatures: unknown[]) {
+  const rubric = getFeatureRubric(animalName)
+  const selected = normalizeFeatures(selectedFeatures)
+
+  const primaryHitCount = selected.filter((feature) =>
+    rubric.primary.includes(feature)
+  ).length
+
+  const acceptableHitCount = selected.filter((feature) =>
+    rubric.acceptable.includes(feature)
+  ).length
+
+  const supportingHitCount = selected.filter((feature) =>
+    rubric.supporting.includes(feature)
+  ).length
+
+  const misleadingHitCount = selected.filter((feature) =>
+    rubric.misleading.includes(feature)
+  ).length
+
+  const selectedPrimaryFeatures = selected.filter((feature) =>
+    rubric.primary.includes(feature)
+  )
+
+  const selectedAcceptableFeatures = selected.filter((feature) =>
+    rubric.acceptable.includes(feature)
+  )
+
+  const selectedSupportingFeatures = selected.filter((feature) =>
+    rubric.supporting.includes(feature)
+  )
+
+  const selectedMisleadingFeatures = selected.filter((feature) =>
+    rubric.misleading.includes(feature)
+  )
+
+  let featureQuality:
+    | 'high'
+    | 'partial'
+    | 'surface_or_misleading'
+    | 'unclear' = 'unclear'
+
+  if (primaryHitCount >= 1 && misleadingHitCount === 0) {
+    featureQuality = 'high'
+  } else if (primaryHitCount + acceptableHitCount >= 1 && misleadingHitCount <= 1) {
+    featureQuality = 'partial'
+  } else if (misleadingHitCount >= 1 && primaryHitCount === 0) {
+    featureQuality = 'surface_or_misleading'
+  }
+
+  return {
+    selectedFeatures: selected,
+    primaryHitCount,
+    acceptableHitCount,
+    supportingHitCount,
+    misleadingHitCount,
+    selectedPrimaryFeatures,
+    selectedAcceptableFeatures,
+    selectedSupportingFeatures,
+    selectedMisleadingFeatures,
+    featureQuality,
+  }
 }
 
 function cueType(feature: string): FeatureMetric['cueType'] {
@@ -573,10 +788,32 @@ const filteredStudents = riskOnly
     )
 
     const filteredItems = itemLogs.filter((item) => filteredRecordIds.has(item.record_id))
-    const filteredEvents = eventLogs.filter((event) => filteredRecordIds.has(event.record_id))
 
-    const evidenceItems = filteredItems.filter((item) => item.stage === 'evidence')
-    const transferItems = filteredItems.filter((item) => item.stage === 'transfer')
+const enrichedItems = filteredItems.map((item) => {
+  const quality = analyzeSelectedFeatureQuality(
+    item.animal_name ?? '',
+    item.selected_features ?? []
+  )
+
+  return {
+    ...item,
+    selected_features: quality.selectedFeatures,
+    primaryHitCount: quality.primaryHitCount,
+    acceptableHitCount: quality.acceptableHitCount,
+    supportingHitCount: quality.supportingHitCount,
+    misleadingHitCount: quality.misleadingHitCount,
+    selectedPrimaryFeatures: quality.selectedPrimaryFeatures,
+    selectedAcceptableFeatures: quality.selectedAcceptableFeatures,
+    selectedSupportingFeatures: quality.selectedSupportingFeatures,
+    selectedMisleadingFeatures: quality.selectedMisleadingFeatures,
+    featureQuality: quality.featureQuality,
+  }
+})
+
+const filteredEvents = eventLogs.filter((event) => filteredRecordIds.has(event.record_id))
+
+const evidenceItems = enrichedItems.filter((item) => item.stage === 'evidence')
+const transferItems = enrichedItems.filter((item) => item.stage === 'transfer')
     const evidenceStudents = unique(evidenceItems.map((item) => item.participant_code)).length
     const transferStudents = unique(transferItems.map((item) => item.participant_code)).length
     const zoomStudents = unique(filteredEvents.filter((event) => event.event_type === 'image_zoom_open').map((event) => event.participant_code)).length
@@ -595,7 +832,7 @@ const filteredStudents = riskOnly
       medianTransferDurationSec: median(transferItems.map((item) => (item.duration_ms == null ? null : item.duration_ms / 1000))),
       zoomUserRate: ratio(zoomStudents, filteredStudents.length),
       avgStructuralFeatureRate: average(filteredStudents.map((student) => student.structuralFeatureRate)),
-      avgReasonCharCount: average(filteredItems.map((item) => item.reason_char_count)),
+      avgReasonCharCount: average(enrichedItems.map((item) => item.reason_char_count)),
     }
 
     const summary: Summary = {
@@ -635,12 +872,12 @@ const filteredStudents = riskOnly
     }))
 
     const questionMap = new Map<string, LearningItemLogRow[]>()
-    for (const item of filteredItems) {
-      const key = `${item.stage}__${item.question_id}`
-      const current = questionMap.get(key) ?? []
-      current.push(item)
-      questionMap.set(key, current)
-    }
+for (const item of enrichedItems) {
+  const key = `${item.stage}__${item.question_id}`
+  const current = questionMap.get(key) ?? []
+  current.push(item)
+  questionMap.set(key, current)
+}
 
     const questionMetrics: QuestionMetric[] = [...questionMap.entries()]
       .map(([key, items]) => {
@@ -659,12 +896,12 @@ const filteredStudents = riskOnly
             return acc
           }, {})
         const wrongFeaturesMap = items
-          .filter((item) => item.is_correct === false)
-          .flatMap((item) => normalizeFeatures(item.selected_features ?? []))
-.reduce<Record<string, number>>((acc, feature) => {
-  acc[feature] = (acc[feature] ?? 0) + 1
-  return acc
-}, {})
+        .filter((item) => item.is_correct === false)
+        .flatMap((item) => item.selected_features ?? [])
+        .reduce<Record<string, number>>((acc, feature) => {
+          acc[feature] = (acc[feature] ?? 0) + 1
+          return acc
+        }, {})
         const highConfidenceWrong = items.filter((item) => item.is_correct === false && (item.confidence ?? 0) >= 3).length
 
         return {
@@ -694,15 +931,15 @@ const filteredStudents = riskOnly
       })
 
     const featureMap = new Map<string, { items: LearningItemLogRow[]; students: Set<string> }>()
-for (const item of filteredItems) {
-  const features = normalizeFeatures(item.selected_features ?? [])
+for (const item of enrichedItems) {
+  const features = item.selected_features ?? []
   for (const feature of features) {
-        const current = featureMap.get(feature) ?? { items: [], students: new Set<string>() }
-        current.items.push(item)
-        current.students.add(item.participant_code)
-        featureMap.set(feature, current)
-      }
-    }
+    const current = featureMap.get(feature) ?? { items: [], students: new Set<string>() }
+    current.items.push(item)
+    current.students.add(item.participant_code)
+    featureMap.set(feature, current)
+  }
+}
 
     const featureMetrics: FeatureMetric[] = [...featureMap.entries()]
       .map(([feature, payload]) => ({
@@ -717,9 +954,30 @@ for (const item of filteredItems) {
       }))
       .sort((a, b) => b.selectedCount - a.selectedCount)
 
+    const featureQualitySummary = {
+  high: enrichedItems.filter((item) => item.featureQuality === 'high').length,
+  partial: enrichedItems.filter((item) => item.featureQuality === 'partial').length,
+  surfaceOrMisleading: enrichedItems.filter(
+    (item) => item.featureQuality === 'surface_or_misleading'
+  ).length,
+  unclear: enrichedItems.filter((item) => item.featureQuality === 'unclear').length,
+}
+
+const averagePrimaryHitCount =
+  enrichedItems.length > 0
+    ? enrichedItems.reduce((sum, item) => sum + (item.primaryHitCount ?? 0), 0) /
+      enrichedItems.length
+    : 0
+
+const averageMisleadingHitCount =
+  enrichedItems.length > 0
+    ? enrichedItems.reduce((sum, item) => sum + (item.misleadingHitCount ?? 0), 0) /
+      enrichedItems.length
+    : 0
+    
     const wrongFeatureMap = new Map<string, MisconceptionAccumulator>()
-    for (const item of filteredItems.filter((row) => row.is_correct === false)) {
-      for (const feature of normalizeFeatures(item.selected_features ?? [])) {
+for (const item of enrichedItems.filter((row) => row.is_correct === false)) {
+  for (const feature of item.selected_features ?? []) {
         const current =
           wrongFeatureMap.get(feature) ?? {
             feature,
@@ -825,26 +1083,29 @@ for (const item of filteredItems) {
     }
 
     return NextResponse.json({
-      ok: true,
-      filters,
-      summary,
-      sampleBases,
-      sampleWarnings,
-      stageFunnel,
-      riskDistribution,
-      studentRows: filteredStudents,
-      highRiskStudents,
-      strongestStudents,
-      questionMetrics,
-      featureMetrics,
-      misconceptionMetrics,
-      insightCards,
-      counts: {
-        records: recordRows.length,
-        itemLogs: filteredItems.length,
-        eventLogs: filteredEvents.length,
-      },
-    } satisfies DashboardResponse)
+  ok: true,
+  filters,
+  summary,
+  sampleBases,
+  sampleWarnings,
+  stageFunnel,
+  riskDistribution,
+  studentRows: filteredStudents,
+  highRiskStudents,
+  strongestStudents,
+  questionMetrics,
+  featureMetrics,
+  misconceptionMetrics,
+  featureQualitySummary,
+  averagePrimaryHitCount,
+  averageMisleadingHitCount,
+  insightCards,
+  counts: {
+    records: recordRows.length,
+    itemLogs: filteredItems.length,
+    eventLogs: filteredEvents.length,
+  },
+} satisfies DashboardResponse)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'unexpected server error'
     return NextResponse.json({ error: message }, { status: 500 })
