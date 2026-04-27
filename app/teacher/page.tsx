@@ -28,6 +28,13 @@ type StudentRow = {
   className: string | null
   seatNo: string | null
   maskedName: string | null
+
+  userRole: string | null
+  useContext: string | null
+  animalClassificationExperience: string | null
+  payloadVersion: string | null
+  featureOptionVersion: string | null
+
   currentStage: string | null
   isCompleted: boolean
   evidenceAccuracy: number | null
@@ -120,11 +127,14 @@ type SampleWarning = {
 type DashboardResponse = {
   ok: true
   filters: {
-    schoolCodes: string[]
-    grades: string[]
-    classNames: string[]
-    stages: string[]
-  }
+  schoolCodes: string[]
+  grades: string[]
+  classNames: string[]
+  userRoles: string[]
+  useContexts: string[]
+  animalClassificationExperiences: string[]
+  stages: string[]
+}
   summary: Summary
   sampleBases: SampleBases
   sampleWarnings: SampleWarning[]
@@ -148,6 +158,9 @@ type FiltersState = {
   schoolCode: string
   grade: string
   className: string
+  userRole: string
+  useContext: string
+  animalClassificationExperience: string
   participantCode: string
   currentStage: string
   completedOnly: boolean
@@ -158,6 +171,9 @@ const INITIAL_FILTERS: FiltersState = {
   schoolCode: '',
   grade: '',
   className: '',
+  userRole: '',
+  useContext: '',
+  animalClassificationExperience: '',
   participantCode: '',
   currentStage: '',
   completedOnly: false,
@@ -409,16 +425,26 @@ export default function TeacherDecisionPage() {
   const [error, setError] = useState('')
 
   const queryString = useMemo(() => {
-    const params = new URLSearchParams()
-    if (filters.schoolCode) params.set('schoolCode', filters.schoolCode)
-    if (filters.grade) params.set('grade', filters.grade)
-    if (filters.className) params.set('className', filters.className)
-    if (filters.participantCode) params.set('participantCode', filters.participantCode)
-    if (filters.currentStage) params.set('currentStage', filters.currentStage)
-    if (filters.completedOnly) params.set('completedOnly', 'true')
-    if (filters.riskOnly) params.set('riskOnly', 'true')
-    return params.toString()
-  }, [filters])
+  const params = new URLSearchParams()
+  if (filters.schoolCode) params.set('schoolCode', filters.schoolCode)
+  if (filters.grade) params.set('grade', filters.grade)
+  if (filters.className) params.set('className', filters.className)
+
+  if (filters.userRole) params.set('userRole', filters.userRole)
+  if (filters.useContext) params.set('useContext', filters.useContext)
+  if (filters.animalClassificationExperience) {
+    params.set(
+      'animalClassificationExperience',
+      filters.animalClassificationExperience
+    )
+  }
+
+  if (filters.participantCode) params.set('participantCode', filters.participantCode)
+  if (filters.currentStage) params.set('currentStage', filters.currentStage)
+  if (filters.completedOnly) params.set('completedOnly', 'true')
+  if (filters.riskOnly) params.set('riskOnly', 'true')
+  return params.toString()
+}, [filters])
 
   useEffect(() => {
     let cancelled = false
@@ -470,6 +496,9 @@ export default function TeacherDecisionPage() {
               <div>learning_records：{data?.counts.records ?? '—'}｜item_logs：{data?.counts.itemLogs ?? '—'}｜event_logs：{data?.counts.eventLogs ?? '—'}</div>
               <div className="mt-2">evidence 有效樣本：{data?.sampleBases.evidenceStudents ?? '—'} 人／{data?.sampleBases.evidenceItems ?? '—'} 題</div>
               <div>transfer 有效樣本：{data?.sampleBases.transferStudents ?? '—'} 人／{data?.sampleBases.transferItems ?? '—'} 題</div>
+              <div className="mt-2 text-xs leading-5 text-amber-700">
+              研究分析建議先篩選：國中學生 × 正式課堂學習，再依動物界分類經驗分組。
+            </div>
             </div>
           </div>
         </div>
@@ -506,6 +535,61 @@ export default function TeacherDecisionPage() {
                 <option key={value} value={value}>{value}</option>
               ))}
             </select>
+
+            <select
+  value={filters.userRole}
+  onChange={(e) =>
+    setFilters((prev) => ({
+      ...prev,
+      userRole: e.target.value,
+    }))
+  }
+  className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+>
+  <option value="">全部身分</option>
+  {data?.filters.userRoles.map((value) => (
+    <option key={value} value={value}>
+      {value}
+    </option>
+  ))}
+</select>
+
+<select
+  value={filters.useContext}
+  onChange={(e) =>
+    setFilters((prev) => ({
+      ...prev,
+      useContext: e.target.value,
+    }))
+  }
+  className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+>
+  <option value="">全部使用情境</option>
+  {data?.filters.useContexts.map((value) => (
+    <option key={value} value={value}>
+      {value}
+    </option>
+  ))}
+</select>
+
+<select
+  value={filters.animalClassificationExperience}
+  onChange={(e) =>
+    setFilters((prev) => ({
+      ...prev,
+      animalClassificationExperience: e.target.value,
+    }))
+  }
+  className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+>
+  <option value="">全部學習經驗</option>
+  {data?.filters.animalClassificationExperiences.map((value) => (
+    <option key={value} value={value}>
+      {value}
+    </option>
+  ))}
+</select>
+
             <select
               value={filters.currentStage}
               onChange={(e) => setFilters((prev) => ({ ...prev, currentStage: e.target.value }))}
@@ -799,9 +883,23 @@ export default function TeacherDecisionPage() {
                       return (
                         <tr key={student.participantCode} className="rounded-2xl bg-gray-50 align-top">
                           <td className="px-3 py-3">
-                            <div className="font-semibold text-gray-900">{student.maskedName || '未具名'}</div>
-                            <div className="text-xs text-gray-500">{student.schoolCode || '—'}｜{student.grade || '—'} 年級 {student.className || '—'} 班 {student.seatNo || '—'} 號</div>
-                            <div className="text-xs text-gray-400">{student.participantCode}</div>
+                            <div className="font-semibold text-gray-900">
+  {student.maskedName || '未具名'}
+</div>
+<div className="text-xs text-gray-500">
+  {student.schoolCode || '—'}｜{student.grade || '—'} 年級{' '}
+  {student.className || '—'} 班 {student.seatNo || '—'} 號
+</div>
+<div className="mt-1 text-xs leading-5 text-gray-500">
+  身分：{student.userRole || '未填'}｜情境：{student.useContext || '未填'}
+</div>
+<div className="text-xs leading-5 text-gray-500">
+  動物界分類經驗：{student.animalClassificationExperience || '未填'}
+</div>
+<div className="text-xs leading-5 text-gray-400">
+  版本：{student.payloadVersion || '—'}｜特徵版本：{student.featureOptionVersion || '—'}
+</div>
+<div className="text-xs text-gray-400">{student.participantCode}</div>
                           </td>
                           <td className="px-3 py-3">{stageLabel(student.currentStage)}</td>
                           <td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${riskTone(student.riskLevel)}`}>{student.riskLevel}</span></td>
