@@ -58,6 +58,11 @@ type StudentRow = {
   className: string | null
   seatNo: string | null
   maskedName: string | null
+  userRole: string | null
+  useContext: string | null
+  animalClassificationExperience: string | null
+  payloadVersion: string | null
+  featureOptionVersion: string | null
   currentStage: string | null
   isCompleted: boolean
   evidenceAccuracy: number | null
@@ -172,6 +177,9 @@ type FiltersResponse = {
   schoolCodes: string[]
   grades: string[]
   classNames: string[]
+  userRoles: string[]
+  useContexts: string[]
+  animalClassificationExperiences: string[]
   stages: string[]
 }
 
@@ -207,34 +215,25 @@ const STRUCTURAL_FEATURES = new Set([
   '無體節',
   '外套膜',
   '肌肉足',
-  '多數有殼',
-  '柔軟身體',
-  '頭足類腕足',
+  '身體柔軟',
   '身體分節',
   '環狀體節',
   '外骨骼',
   '成對附肢',
+  '附肢有關節',
   '棘皮',
   '管足',
-  '五輻對稱',
-  '棘皮動物特徵',
+  '成體輻射對稱',
 ])
 
 const SURFACE_FEATURES = new Set([
-  '會飛',
-  '星形',
-  '顏色鮮豔',
-  '外型像花',
-  '皆為寄生蟲',
-  '生活在水中',
+  '多數有殼',
+  '外表有殼或硬殼',
   '身體細長',
-  '生活在泥土或水裡',
-  '腳很多',
-  '住在海邊',
-  '固著不動',
-  '有外骨骼',
-  '外表有殼',
-  '看起來很軟',
+  '固著生活',
+  '水中生活',
+  '海水中生活',
+  '寄生生活',
 ])
 
 const STAGE_KEYS = ['stage1', 'awareness', 'evidence', 'transfer', 'done']
@@ -268,9 +267,50 @@ function unique<T>(values: T[]) {
   return [...new Set(values)]
 }
 
+function normalizeFeatureName(feature: unknown) {
+  if (typeof feature !== 'string') return ''
+
+  const raw = feature.trim()
+
+  const map: Record<string, string> = {
+    柔軟身體: '身體柔軟',
+    身體柔軟不分節: '身體柔軟',
+
+    成體多呈五輻對稱: '成體輻射對稱',
+    成體多為五輻對稱: '成體輻射對稱',
+    五輻對稱: '成體輻射對稱',
+    五輻對稱特徵: '成體輻射對稱',
+
+    有外骨骼: '外骨骼',
+    具有外骨骼: '外骨骼',
+
+    外表有殼: '外表有殼或硬殼',
+    有沒有殼: '外表有殼或硬殼',
+
+    生活在水中: '水中生活',
+    住在海邊: '海水中生活',
+    固著不動: '固著生活',
+    皆為寄生蟲: '寄生生活',
+
+    腳很多: '成對附肢',
+    足分節且有關節: '附肢有關節',
+
+    頭足類腕足: '肌肉足',
+    棘皮動物特徵: '棘皮',
+  }
+
+  return map[raw] ?? raw
+}
+
+function normalizeFeatures(features: unknown[]) {
+  return features.map(normalizeFeatureName).filter(Boolean)
+}
+
 function cueType(feature: string): FeatureMetric['cueType'] {
-  if (STRUCTURAL_FEATURES.has(feature)) return '結構線索'
-  if (SURFACE_FEATURES.has(feature)) return '表面線索'
+  const normalized = normalizeFeatureName(feature)
+
+  if (STRUCTURAL_FEATURES.has(normalized)) return '結構線索'
+  if (SURFACE_FEATURES.has(normalized)) return '表面線索'
   return '待分類'
 }
 
@@ -299,8 +339,8 @@ function parsePayloadInfo(payload: JsonRecord | null) {
   const nonEmptyGroups = stage1Groups.filter((group) => toArray(group.cardIds).length > 0)
   const overallReason = safeString(stage1?.overallReason) ?? ''
 
-  const diagnosticFeatures = toArray(awareness?.diagnosticFeatures).filter((item): item is string => typeof item === 'string')
-  const possibleFeatures = toArray(awareness?.possibleFeatures).filter((item): item is string => typeof item === 'string')
+  const diagnosticFeatures = normalizeFeatures(toArray(awareness?.diagnosticFeatures))
+  const possibleFeatures = normalizeFeatures(toArray(awareness?.possibleFeatures))
   const readinessAttemptCounts = toObject(awareness?.readinessAttemptCounts) ?? {}
   const readinessCounts = Object.values(readinessAttemptCounts).filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
   const answeredReadiness = readinessCounts.length
@@ -362,6 +402,10 @@ export async function GET(req: NextRequest) {
     const className = searchParams.get('className')?.trim() ?? ''
     const participantCode = searchParams.get('participantCode')?.trim() ?? ''
     const stageFilter = searchParams.get('currentStage')?.trim() ?? ''
+    const userRoleFilter = searchParams.get('userRole')?.trim() ?? ''
+    const useContextFilter = searchParams.get('useContext')?.trim() ?? ''
+    const animalClassificationExperienceFilter =
+      searchParams.get('animalClassificationExperience')?.trim() ?? ''
     const completedOnly = searchParams.get('completedOnly') === 'true'
     const riskOnly = searchParams.get('riskOnly') === 'true'
 
@@ -438,8 +482,24 @@ export async function GET(req: NextRequest) {
       const evidenceCorrect = evidenceItems.filter((item) => item.is_correct === true).length
       const transferCorrect = transferItems.filter((item) => item.is_correct === true).length
       const zoomOpenEvents = recordEvents.filter((event) => event.event_type === 'image_zoom_open')
-      const selectedFeatures = recordItems.flatMap((item) => item.selected_features ?? [])
-      const structuralCount = selectedFeatures.filter((feature) => STRUCTURAL_FEATURES.has(feature)).length
+      const selectedFeatures = normalizeFeatures(
+  recordItems.flatMap((item) => item.selected_features ?? [])
+)
+      const structuralCount = selectedFeatures.filter((feature) =>
+  STRUCTURAL_FEATURES.has(feature)
+).length
+
+      const payload = record.payload ?? {}
+      const participant = toObject(payload.participant)
+
+      const userRole = safeString(participant?.userRole)
+      const useContext = safeString(participant?.useContext)
+      const animalClassificationExperience = safeString(
+  participant?.animalClassificationExperience
+)
+      const payloadVersion = safeString(payload.version)
+      const featureOptionVersion = safeString(payload.featureOptionVersion)
+
       const payloadInfo = parsePayloadInfo(record.payload)
 
       const baseStudent = {
@@ -449,6 +509,11 @@ export async function GET(req: NextRequest) {
         className: record.class_name,
         seatNo: record.seat_no,
         maskedName: record.masked_name,
+        userRole,
+        useContext,
+        animalClassificationExperience,
+        payloadVersion,
+        featureOptionVersion,
         currentStage: record.current_stage,
         isCompleted: Boolean(record.is_completed),
         evidenceAccuracy: ratio(evidenceCorrect, evidenceItems.length),
@@ -482,9 +547,24 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    const filteredStudents = riskOnly
-      ? studentRows.filter((student) => ['高', '中', '未完成'].includes(student.riskLevel))
-      : studentRows
+    const backgroundFilteredStudents = studentRows.filter((student) => {
+  if (userRoleFilter && student.userRole !== userRoleFilter) return false
+  if (useContextFilter && student.useContext !== useContextFilter) return false
+  if (
+    animalClassificationExperienceFilter &&
+    student.animalClassificationExperience !== animalClassificationExperienceFilter
+  ) {
+    return false
+  }
+
+  return true
+})
+
+const filteredStudents = riskOnly
+  ? backgroundFilteredStudents.filter((student) =>
+      ['高', '中', '未完成'].includes(student.riskLevel)
+    )
+  : backgroundFilteredStudents
 
     const filteredRecordIds = new Set(
       filteredStudents
@@ -580,11 +660,11 @@ export async function GET(req: NextRequest) {
           }, {})
         const wrongFeaturesMap = items
           .filter((item) => item.is_correct === false)
-          .flatMap((item) => item.selected_features ?? [])
-          .reduce<Record<string, number>>((acc, feature) => {
-            acc[feature] = (acc[feature] ?? 0) + 1
-            return acc
-          }, {})
+          .flatMap((item) => normalizeFeatures(item.selected_features ?? []))
+.reduce<Record<string, number>>((acc, feature) => {
+  acc[feature] = (acc[feature] ?? 0) + 1
+  return acc
+}, {})
         const highConfidenceWrong = items.filter((item) => item.is_correct === false && (item.confidence ?? 0) >= 3).length
 
         return {
@@ -614,9 +694,9 @@ export async function GET(req: NextRequest) {
       })
 
     const featureMap = new Map<string, { items: LearningItemLogRow[]; students: Set<string> }>()
-    for (const item of filteredItems) {
-      const features = item.selected_features ?? []
-      for (const feature of features) {
+for (const item of filteredItems) {
+  const features = normalizeFeatures(item.selected_features ?? [])
+  for (const feature of features) {
         const current = featureMap.get(feature) ?? { items: [], students: new Set<string>() }
         current.items.push(item)
         current.students.add(item.participant_code)
@@ -639,7 +719,7 @@ export async function GET(req: NextRequest) {
 
     const wrongFeatureMap = new Map<string, MisconceptionAccumulator>()
     for (const item of filteredItems.filter((row) => row.is_correct === false)) {
-      for (const feature of item.selected_features ?? []) {
+      for (const feature of normalizeFeatures(item.selected_features ?? [])) {
         const current =
           wrongFeatureMap.get(feature) ?? {
             feature,
@@ -691,11 +771,18 @@ export async function GET(req: NextRequest) {
 
     const filterRows = (filterValuesResponse.data ?? []) as Array<{ school_code: string | null; grade: string | null; class_name: string | null }>
     const filters: FiltersResponse = {
-      schoolCodes: unique(filterRows.map((row) => row.school_code).filter(Boolean) as string[]).sort(),
-      grades: unique(filterRows.map((row) => row.grade).filter(Boolean) as string[]).sort(),
-      classNames: unique(filterRows.map((row) => row.class_name).filter(Boolean) as string[]).sort(),
-      stages: STAGE_KEYS,
-    }
+  schoolCodes: unique(filterRows.map((row) => row.school_code).filter(Boolean) as string[]).sort(),
+  grades: unique(filterRows.map((row) => row.grade).filter(Boolean) as string[]).sort(),
+  classNames: unique(filterRows.map((row) => row.class_name).filter(Boolean) as string[]).sort(),
+  userRoles: unique(studentRows.map((row) => row.userRole).filter(Boolean) as string[]).sort(),
+  useContexts: unique(studentRows.map((row) => row.useContext).filter(Boolean) as string[]).sort(),
+  animalClassificationExperiences: unique(
+    studentRows
+      .map((row) => row.animalClassificationExperience)
+      .filter(Boolean) as string[]
+  ).sort(),
+  stages: STAGE_KEYS,
+}
 
     const insightCards: InsightCard[] = []
 
