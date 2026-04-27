@@ -100,6 +100,13 @@ type MisconceptionMetric = {
   highConfidenceWrongCount: number
 }
 
+type FeatureQualitySummary = {
+  high: number
+  partial: number
+  surfaceOrMisleading: number
+  unclear: number
+}
+
 type InsightCard = {
   title: string
   body: string
@@ -146,6 +153,9 @@ type DashboardResponse = {
   questionMetrics: QuestionMetric[]
   featureMetrics: FeatureMetric[]
   misconceptionMetrics: MisconceptionMetric[]
+  featureQualitySummary: FeatureQualitySummary
+  averagePrimaryHitCount: number
+  averageMisleadingHitCount: number
   insightCards: InsightCard[]
   counts: {
     records: number
@@ -348,6 +358,68 @@ function diagnoseStudent(student: StudentRow) {
   return { reasons, question }
 }
 
+function featureQualityTotal(summary: FeatureQualitySummary | undefined) {
+  if (!summary) return 0
+  return (
+    summary.high +
+    summary.partial +
+    summary.surfaceOrMisleading +
+    summary.unclear
+  )
+}
+
+function buildFeatureQualityDiagnosis(data: DashboardResponse) {
+  const summary = data.featureQualitySummary
+  const total = featureQualityTotal(summary)
+
+  if (total === 0) {
+    return {
+      title: '目前尚無足夠的特徵選擇資料',
+      severity: 'info' as const,
+      body:
+        '目前篩選條件下還沒有可分析的特徵選擇紀錄。請先確認學生是否已完成第 3 或第 4 階段。',
+    }
+  }
+
+  const highRate = summary.high / total
+  const misleadingRate = summary.surfaceOrMisleading / total
+  const partialRate = summary.partial / total
+
+  if (misleadingRate >= 0.35) {
+    return {
+      title: '學生仍明顯受到表面或誤導線索影響',
+      severity: 'strong' as const,
+      body:
+        `目前有 ${pct(misleadingRate)} 的作答屬於表面或誤導線索依賴。建議教師優先安排對比例題，例如「蛤蠣 vs. 蝦子」、「海參 vs. 蚯蚓」、「珊瑚 vs. 外型像植物的生物」，要求學生說明判準而不是只說答案。`,
+    }
+  }
+
+  if (highRate >= 0.5) {
+    return {
+      title: '學生已有相當比例能優先使用主要診斷特徵',
+      severity: 'info' as const,
+      body:
+        `目前有 ${pct(highRate)} 的作答屬於高品質特徵選擇，代表學生不只是答對，而是開始能優先使用具分類診斷力的判準。接下來可進一步看哪些題目仍存在高信心錯答。`,
+    }
+  }
+
+  if (partialRate >= 0.4) {
+    return {
+      title: '學生多已部分掌握，但判準優先順序仍不穩定',
+      severity: 'warn' as const,
+      body:
+        `目前有 ${pct(partialRate)} 的作答屬於部分掌握。學生可能選到可接受的核心特徵，但尚未穩定抓到最有診斷力的 1–2 個判準。建議下一步讓學生比較「哪一個特徵最能排除其他門」。`,
+    }
+  }
+
+  return {
+    title: '特徵選擇品質仍需搭配題目與學生個別表現解讀',
+    severity: 'warn' as const,
+    body:
+      '目前特徵選擇品質分布較分散。建議先看「最值得重教的題目」與「迷思線索排行榜」，再決定是否需要全班重教或分組補救。',
+  }
+}
+
 function buildClassDiagnosis(data: DashboardResponse) {
   const { summary, sampleBases } = data
   if (summary.totalStudents === 0) {
@@ -390,6 +462,7 @@ function useDecisionPanels(data: DashboardResponse | null) {
     if (!data) return null
 
     const classDiagnosis = buildClassDiagnosis(data)
+    const featureQualityDiagnosis = buildFeatureQualityDiagnosis(data)
 
     const interventionStudents = data.highRiskStudents.slice(0, 5).map((student) => ({
       student,
@@ -414,7 +487,13 @@ function useDecisionPanels(data: DashboardResponse | null) {
         teachingNote: getFeatureTeachingNote(feature),
       }))
 
-    return { classDiagnosis, interventionStudents, reteachQuestions, clarifyFeatures }
+    return {
+  classDiagnosis,
+  featureQualityDiagnosis,
+  interventionStudents,
+  reteachQuestions,
+  clarifyFeatures,
+}
   }, [data])
 }
 
@@ -732,6 +811,88 @@ export default function TeacherDecisionPage() {
               <SummaryCard title="平均 evidence 秒數" value={num(data.summary.avgEvidenceDurationSec, 1)} helper={`中位數 ${num(data.summary.medianEvidenceDurationSec, 1)} 秒`} />
               <SummaryCard title="zoom 使用率" value={pct(data.summary.zoomUserRate)} helper={`至少使用一次 zoom：${data.sampleBases.zoomStudents}/${data.sampleBases.totalStudents} 人；事件 ${data.sampleBases.zoomEvents} 筆`} />
             </div>
+
+            <Section
+  title="特徵選擇品質診斷"
+  subtitle="這一區不是要求學生選完所有核心特徵，而是判斷學生是否能優先選出最有診斷力的 1–2 個分類判準。"
+>
+  <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+    <div className={`rounded-2xl border p-4 ${severityTone(decisions.featureQualityDiagnosis.severity)}`}>
+      <div className="text-lg font-black text-gray-900">特徵選擇一句話診斷</div>
+      <div className="mt-3 text-sm font-semibold text-gray-900">
+        {decisions.featureQualityDiagnosis.title}
+      </div>
+      <div className="mt-2 text-sm leading-6 text-gray-700">
+        {decisions.featureQualityDiagnosis.body}
+      </div>
+      <div className="mt-3 rounded-xl bg-white/70 p-3 text-xs leading-5 text-gray-600">
+        判讀提醒：第四階段最多只能選 2 項，因此本區重點是「是否選到主要診斷特徵」，不是「是否選完所有正確特徵」。
+      </div>
+    </div>
+
+    <div className="grid gap-3 md:grid-cols-2">
+      <SummaryCard
+        title="高品質特徵選擇"
+        value={data.featureQualitySummary.high.toString()}
+        helper={`能選到主要診斷特徵，且未明顯依賴誤導線索。比例：${pct(
+          featureQualityTotal(data.featureQualitySummary) > 0
+            ? data.featureQualitySummary.high / featureQualityTotal(data.featureQualitySummary)
+            : null
+        )}`}
+      />
+      <SummaryCard
+        title="部分掌握"
+        value={data.featureQualitySummary.partial.toString()}
+        helper={`選到部分可接受核心特徵，但判準優先順序可能仍不穩。比例：${pct(
+          featureQualityTotal(data.featureQualitySummary) > 0
+            ? data.featureQualitySummary.partial / featureQualityTotal(data.featureQualitySummary)
+            : null
+        )}`}
+      />
+      <SummaryCard
+        title="表面／誤導線索依賴"
+        value={data.featureQualitySummary.surfaceOrMisleading.toString()}
+        helper={`主要受到表面或誤導線索影響。比例：${pct(
+          featureQualityTotal(data.featureQualitySummary) > 0
+            ? data.featureQualitySummary.surfaceOrMisleading /
+                featureQualityTotal(data.featureQualitySummary)
+            : null
+        )}`}
+      />
+      <SummaryCard
+        title="特徵判準不明確"
+        value={data.featureQualitySummary.unclear.toString()}
+        helper={`未能明確歸入主要、部分掌握或表面誤導類型。比例：${pct(
+          featureQualityTotal(data.featureQualitySummary) > 0
+            ? data.featureQualitySummary.unclear / featureQualityTotal(data.featureQualitySummary)
+            : null
+        )}`}
+      />
+    </div>
+  </div>
+
+  <div className="mt-4 grid gap-4 md:grid-cols-2">
+    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+      <div className="text-sm font-semibold text-gray-500">平均主要診斷特徵命中數</div>
+      <div className="mt-2 text-3xl font-black text-gray-900">
+        {num(data.averagePrimaryHitCount, 2)}
+      </div>
+      <div className="mt-2 text-sm leading-6 text-gray-600">
+        數值越高，代表學生越能優先抓到該題最有分類診斷力的特徵。
+      </div>
+    </div>
+
+    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+      <div className="text-sm font-semibold text-gray-500">平均誤導特徵命中數</div>
+      <div className="mt-2 text-3xl font-black text-gray-900">
+        {num(data.averageMisleadingHitCount, 2)}
+      </div>
+      <div className="mt-2 text-sm leading-6 text-gray-600">
+        數值越高，代表學生越容易被外觀、棲地或不穩定線索帶偏。
+      </div>
+    </div>
+  </div>
+</Section>
 
             <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
               <Section title="鷹架依賴與學習進度" subtitle="先看這班是概念未建立，還是有鷹架會做、離開提示就失準。">
