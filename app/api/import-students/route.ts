@@ -71,15 +71,15 @@ export async function POST(req: Request) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    const teacherPassword = process.env.TEACHER_DASHBOARD_PASSWORD
+    const adminPassword = process.env.ADMIN_PASSWORD
 
     if (!supabaseUrl || !serviceRoleKey) {
       return NextResponse.json({ error: 'Supabase env missing' }, { status: 500 })
     }
 
-    if (!teacherPassword) {
+    if (!adminPassword) {
       return NextResponse.json(
-        { error: 'TEACHER_DASHBOARD_PASSWORD missing' },
+        { error: 'ADMIN_PASSWORD missing' },
         { status: 500 }
       )
     }
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
     const action = cleanStr(body.action) as 'validate' | 'import'
     const text = String(body.text ?? '')
 
-    if (password !== teacherPassword) {
+    if (password !== adminPassword) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
     }
 

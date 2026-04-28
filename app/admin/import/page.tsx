@@ -115,17 +115,29 @@ export default function ImportPage() {
             名單匯入中心
           </h1>
           <p className="mt-2 text-sm leading-6 text-gray-600">
-            先驗證，再匯入。這一頁同時支援學校名單與學生名單匯入，避免直接寫入造成資料污染。
+            先驗證，再匯入。此頁供管理者匯入學校或大量學生名單。一般教師請至「教師診斷頁 → 學生名單管理」匯入自己班級名單。
           </p>
 
           <div className="mt-4 flex flex-col gap-3 md:flex-row">
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="教師 / 管理密碼"
-              className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm md:max-w-sm"
-            />
+            <div className="flex w-full gap-2 md:max-w-sm">
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="管理密碼"
+                className="min-w-0 flex-1 rounded-xl border border-gray-300 px-4 py-3 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setPassword('')
+                  setResult(null)
+                }}
+                className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold text-gray-700"
+              >
+                清除密碼
+              </button>
+            </div>
 
             <div className="flex gap-2">
               <button
@@ -257,7 +269,7 @@ export default function ImportPage() {
 
               {result?.error ? (
                 <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {result.error}
+                  {result.error === 'unauthorized' ? '管理密碼不正確。請確認 Vercel / .env.local 的 ADMIN_PASSWORD。' : result.error}
                 </div>
               ) : null}
 
