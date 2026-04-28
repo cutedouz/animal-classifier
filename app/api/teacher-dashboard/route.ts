@@ -739,7 +739,10 @@ export async function GET(req: NextRequest) {
       admin.from('learning_records').select('school_code, grade, class_name').range(0, 2999),
       allRecordIds.length > 0
         ? admin
-            .from('learning_item_logs')
+// Use latest_learning_item_logs for teacher-facing diagnostics to avoid
+    // double-counting repeated submissions from the same participant/stage/item.
+    // Raw learning_item_logs remains the append-only history table.
+                .from('latest_learning_item_logs')
             .select('record_id, participant_code, stage, question_id, animal_name, entered_at, submitted_at, duration_ms, final_answer, selected_features, selected_features_count, feature_selection_order, primary_feature, secondary_features, feature_options_shown, feature_option_order, random_seed, max_selectable_features, feature_option_version, reason_text, reason_char_count, exclusion_reason_text, exclusion_reason_char_count, confidence, familiarity, learned_before, is_correct, criterion_quality, diagnostic_hit_count, acceptable_hit_count, auxiliary_count, misleading_count, high_confidence_error, scoring_rubric_version')
             .in('record_id', allRecordIds)
         : Promise.resolve({ data: [], error: null }),

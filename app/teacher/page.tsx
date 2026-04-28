@@ -710,13 +710,21 @@ export default function TeacherDecisionPage() {
                   <div className="text-xs leading-5 text-gray-500">
                     可查看班級：{teacherInfo.authorizedClasses.map((item) => `${item.schoolCode} ${item.className}`).join('、') || '尚未設定'}
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleTeacherLogout}
-                    className="mt-2 rounded-lg border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700"
-                  >
-                    登出
-                  </button>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <a
+                      href="/teacher/roster"
+                      className="rounded-lg border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700"
+                    >
+                      學生名單管理
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleTeacherLogout}
+                      className="rounded-lg border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700"
+                    >
+                      登出
+                    </button>
+                  </div>
                 </div>
               ) : null}
               <div>目前篩選後學生數：<span className="font-bold text-gray-900">{data?.summary.totalStudents ?? '—'}</span></div>
@@ -730,7 +738,36 @@ export default function TeacherDecisionPage() {
           </div>
         </div>
 
-        <Section title="篩選條件" subtitle="先縮小範圍，再看班級整體與個別學生。這是教學決策頁，不是排行榜。">
+                <section
+          data-testid="teacher-roster-toolbar-before-filters"
+          className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-bold text-gray-900">教師工具</div>
+              <div className="mt-1 text-xs leading-5 text-gray-500">
+                可前往學生名單管理頁，匯入或更新已授權班級名單。
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href="/teacher/roster"
+                className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+              >
+                學生名單管理
+              </a>
+              <button
+                type="button"
+                onClick={handleTeacherLogout}
+                className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+              >
+                登出
+              </button>
+            </div>
+          </div>
+        </section>
+
+<Section title="篩選條件" subtitle="先縮小範圍，再看班級整體與個別學生。這是教學決策頁，不是排行榜。">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <select
               value={filters.schoolCode}

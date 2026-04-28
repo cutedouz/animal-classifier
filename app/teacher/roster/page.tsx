@@ -147,6 +147,11 @@ export default function TeacherRosterPage() {
     }
   }
 
+  async function handleTeacherLogout() {
+    await fetch('/api/teacher-logout', { method: 'POST' })
+    window.location.href = '/teacher'
+  }
+
   if (authRequired) {
     return (
       <main className="min-h-screen bg-gray-50 px-4 py-10">
@@ -192,6 +197,13 @@ export default function TeacherRosterPage() {
                 className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
               >
                 重新讀取
+              </button>
+              <button
+                type="button"
+                onClick={handleTeacherLogout}
+                className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+              >
+                登出
               </button>
             </div>
           </div>
