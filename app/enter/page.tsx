@@ -662,7 +662,7 @@ function validateResearchBackground(mode: EntryMode) {
           </p>
 
           <p className="mt-2 text-sm leading-6 text-[#667266]">
-            正式參與請使用正式名單登入；課程體驗可自行填寫學校、班級與姓名後進入。
+            班級參與請使用班級名單登入；課程體驗可自行填寫學校、班級與姓名後進入。
           </p>
         </div>
 
@@ -676,7 +676,7 @@ function validateResearchBackground(mode: EntryMode) {
                 : 'border border-[#c8d2c8] bg-white text-[#234a2c]'
             }`}
           >
-            正式參與
+            班級參與
           </button>
 
           <button
@@ -695,7 +695,7 @@ function validateResearchBackground(mode: EntryMode) {
         {entryMode === 'roster' ? (
           <>
             <div className="mb-4 rounded-xl border border-[#e6d8a8] bg-[#fff8df] px-4 py-3 text-sm leading-6 text-[#8b6a1a]">
-              正式參與：供已匯入名單的教師及學生使用。此模式供班級教學診斷與後續去識別化分析使用。請先選擇學校、班級、座號並確認姓名；進入第一階段前需再輸入密碼。
+              班級參與：供已匯入名單的教師及學生使用。此模式供班級教學診斷與後續去識別化分析使用。請先選擇學校、班級、座號並確認姓名；進入第一階段前需再輸入密碼。
             </div>
 
             {rosterLoadError ? (
@@ -837,7 +837,7 @@ function validateResearchBackground(mode: EntryMode) {
   </div>
 
   <div className="mb-3 rounded-lg bg-[#f3f6f2] px-3 py-2 text-xs leading-5 text-[#667266]">
-    正式參與將記錄為「國中學生」與「正式課堂學習」。請再選擇你目前對動物界分類單元的學習經驗。
+    班級參與將記錄為「國中學生」與「正式課堂學習」。請再選擇你目前對動物界分類單元的學習經驗。
   </div>
 
   <label className="mb-1 block text-sm font-semibold text-[#425142]">
@@ -905,7 +905,7 @@ function validateResearchBackground(mode: EntryMode) {
         {entryMode === 'manual' ? (
           <>
             <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900">
-              課程體驗：若不在正式名單中，可自行填寫學校、班級、姓名後進入。
+              課程體驗：若不在班級名單中，可自行填寫學校、班級、姓名後進入。
             </div>
 
             <div className="mb-4 rounded-xl border border-[#dfe8df] bg-white px-4 py-3">
