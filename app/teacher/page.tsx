@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 
 type Summary = {
   totalStudents: number
@@ -78,6 +78,16 @@ type QuestionMetric = {
   topWrongAnswers: string[]
   topWrongFeatures: string[]
   highConfidenceWrongRate: number | null
+  highFeatureQualityCount: number
+  partialFeatureQualityCount: number
+  surfaceOrMisleadingCount: number
+  unclearFeatureQualityCount: number
+  highFeatureQualityRate: number | null
+  surfaceOrMisleadingRate: number | null
+  avgPrimaryHitCount: number | null
+  avgMisleadingHitCount: number | null
+  topPrimaryFeatures: string[]
+  topMisleadingFeatures: string[]
 }
 
 type FeatureMetric = {
@@ -133,6 +143,18 @@ type SampleWarning = {
 
 type DashboardResponse = {
   ok: true
+  teacher?: {
+    id: string
+    username: string | null
+    email: string | null
+    displayName: string
+    authorizedClasses: Array<{
+      schoolCode: string
+      schoolName: string | null
+      grade: string | null
+      className: string
+    }>
+  }
   filters: {
   schoolCodes: string[]
   grades: string[]
@@ -202,11 +224,13 @@ function num(value: number | null | undefined, digits = 1) {
 
 function stageLabel(stage: string | null) {
   const map: Record<string, string> = {
-    stage1: '第 1 階段',
-    awareness: '第 2 階段',
-    evidence: '第 3 階段',
-    transfer: '第 4 階段',
-    done: '完成',
+    stage1: '第 1 階段：自由分類',
+    reflection: '第 2 階段：線索反思',
+    guide: '第 3 階段：六門提示卡',
+    awareness: '第 2–3 階段：舊版判準建立',
+    evidence: '第 4 階段：帶提示判定',
+    transfer: '第 5 階段：遷移應用',
+    done: '第 6 階段：診斷回饋',
   }
   return stage ? (map[stage] ?? stage) : '未記錄'
 }
@@ -285,16 +309,16 @@ function capabilityCards(students: StudentRow[], sampleBases: SampleBases) {
       note: '學生是否至少開始區分「較具診斷力的線索」與「不穩定的線索」。',
     },
     {
-      title: '帶提示判定穩定',
+      title: '第 4 階段帶提示判定穩定',
       count: evidenceStable,
       total: sampleBases.evidenceStudents,
-      note: `evidence 有效樣本 ${sampleBases.evidenceStudents}；學生在有鷹架支持時，是否能相對穩定地做出門別判定。`,
+      note: `第 4 階段 evidence 有效樣本 ${sampleBases.evidenceStudents}；學生在有鷹架支持時，是否能相對穩定地做出門別判定。`,
     },
     {
-      title: '遷移判定穩定',
+      title: '第 5 階段遷移判定穩定',
       count: transferStable,
       total: sampleBases.transferStudents,
-      note: `transfer 有效樣本 ${sampleBases.transferStudents}；學生在移除提示卡後，是否仍能把規則套用到新生物。`,
+      note: `第 5 階段 transfer 有效樣本 ${sampleBases.transferStudents}；學生在移除提示卡後，是否仍能把規則套用到新生物。`,
     },
     {
       title: '由表面走向結構',
@@ -377,7 +401,7 @@ function buildFeatureQualityDiagnosis(data: DashboardResponse) {
       title: '目前尚無足夠的特徵選擇資料',
       severity: 'info' as const,
       body:
-        '目前篩選條件下還沒有可分析的特徵選擇紀錄。請先確認學生是否已完成第 3 或第 4 階段。',
+        '目前篩選條件下還沒有可分析的特徵選擇紀錄。請先確認學生是否已完成第 4 或第 5 階段。',
     }
   }
 
@@ -433,14 +457,14 @@ function buildClassDiagnosis(data: DashboardResponse) {
     return {
       title: '目前最優先不是看正確率，而是先讓更多學生走完整個流程',
       severity: 'strong' as const,
-      body: `目前共 ${summary.totalStudents} 位學生，但完成率僅 ${pct(summary.completionRate)}。在流程尚未走完前，低正確率不宜直接解讀為概念不足。建議先處理卡在第 2 或第 3 階段的學生。`,
+      body: `目前共 ${summary.totalStudents} 位學生，但完成率僅 ${pct(summary.completionRate)}。在流程尚未走完前，低正確率不宜直接解讀為概念不足。建議先處理卡在第 2、3 或第 4 階段的學生。`,
     }
   }
   if (sampleBases.transferStudents < 5) {
     return {
       title: '目前可先看早期訊號，但尚不足以下全班定論',
       severity: 'warn' as const,
-      body: `目前 transfer 有效樣本僅 ${sampleBases.transferStudents} 人。可以先看哪些題目與特徵開始出現共同錯誤，但暫時不宜把 transfer 正確率當成全班結論。`,
+      body: `目前 第 5 階段 transfer 有效樣本僅 ${sampleBases.transferStudents} 人。可以先看哪些題目與特徵開始出現共同錯誤，但暫時不宜把 transfer 正確率當成全班結論。`,
     }
   }
   if ((summary.sdi ?? 0) >= 0.2) {
@@ -502,6 +526,11 @@ export default function TeacherDecisionPage() {
   const [data, setData] = useState<DashboardResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [authRequired, setAuthRequired] = useState(false)
+  const [teacherIdentifier, setTeacherIdentifier] = useState('')
+  const [teacherPassword, setTeacherPassword] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [teacherInfo, setTeacherInfo] = useState<DashboardResponse['teacher'] | null>(null)
 
   const queryString = useMemo(() => {
   const params = new URLSearchParams()
@@ -533,8 +562,24 @@ export default function TeacherDecisionPage() {
       try {
         const response = await fetch(`/api/teacher-dashboard?${queryString}`, { cache: 'no-store' })
         const result = await response.json()
+
+        if (response.status === 401) {
+          if (!cancelled) {
+            setAuthRequired(true)
+            setTeacherInfo(null)
+            setData(null)
+            setError('')
+          }
+          return
+        }
+
         if (!response.ok) throw new Error(result?.error || '讀取教師分析頁資料失敗')
-        if (!cancelled) setData(result)
+
+        if (!cancelled) {
+          setAuthRequired(false)
+          setTeacherInfo(result?.teacher ?? null)
+          setData(result)
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : '未知錯誤')
@@ -550,8 +595,96 @@ export default function TeacherDecisionPage() {
     }
   }, [queryString])
 
+  async function handleTeacherLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setLoginLoading(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/teacher-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: teacherIdentifier,
+          password: teacherPassword,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result?.error || '教師登入失敗')
+      }
+
+      window.location.reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '教師登入失敗')
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  async function handleTeacherLogout() {
+    await fetch('/api/teacher-logout', { method: 'POST' })
+    window.location.reload()
+  }
+
   const decisions = useDecisionPanels(data)
   const capability = useMemo(() => (data ? capabilityCards(data.studentRows, data.sampleBases) : []), [data])
+
+  if (authRequired) {
+    return (
+      <main className="min-h-screen bg-gray-50 px-4 py-10 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-md rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-black tracking-tight text-gray-900">
+            教師診斷頁登入
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-gray-600">
+            請使用教師帳號登入。登入後僅能查看已授權的任教班級資料。
+          </p>
+
+          <form onSubmit={handleTeacherLogin} className="mt-6 space-y-4">
+            <div>
+              <label className="text-sm font-semibold text-gray-700">教師帳號</label>
+              <input
+                value={teacherIdentifier}
+                onChange={(event) => setTeacherIdentifier(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+                placeholder="例如 teacher001"
+                autoComplete="username"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-semibold text-gray-700">密碼</label>
+              <input
+                type="password"
+                value={teacherPassword}
+                onChange={(event) => setTeacherPassword(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+                placeholder="請輸入密碼"
+                autoComplete="current-password"
+              />
+            </div>
+
+            {error ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {loginLoading ? '登入中…' : '登入教師診斷頁'}
+            </button>
+          </form>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-4 sm:px-6 lg:px-8">
@@ -571,10 +704,25 @@ export default function TeacherDecisionPage() {
               </ol>
             </div>
             <div className="rounded-2xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+              {teacherInfo ? (
+                <div className="mb-3 rounded-xl border border-gray-200 bg-white p-3">
+                  <div className="font-bold text-gray-900">{teacherInfo.displayName}</div>
+                  <div className="text-xs leading-5 text-gray-500">
+                    可查看班級：{teacherInfo.authorizedClasses.map((item) => `${item.schoolCode} ${item.className}`).join('、') || '尚未設定'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTeacherLogout}
+                    className="mt-2 rounded-lg border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700"
+                  >
+                    登出
+                  </button>
+                </div>
+              ) : null}
               <div>目前篩選後學生數：<span className="font-bold text-gray-900">{data?.summary.totalStudents ?? '—'}</span></div>
               <div>learning_records：{data?.counts.records ?? '—'}｜item_logs：{data?.counts.itemLogs ?? '—'}｜event_logs：{data?.counts.eventLogs ?? '—'}</div>
-              <div className="mt-2">evidence 有效樣本：{data?.sampleBases.evidenceStudents ?? '—'} 人／{data?.sampleBases.evidenceItems ?? '—'} 題</div>
-              <div>transfer 有效樣本：{data?.sampleBases.transferStudents ?? '—'} 人／{data?.sampleBases.transferItems ?? '—'} 題</div>
+              <div className="mt-2">第 4 階段 evidence 有效樣本：{data?.sampleBases.evidenceStudents ?? '—'} 人／{data?.sampleBases.evidenceItems ?? '—'} 題</div>
+              <div>第 5 階段 transfer 有效樣本：{data?.sampleBases.transferStudents ?? '—'} 人／{data?.sampleBases.transferItems ?? '—'} 題</div>
               <div className="mt-2 text-xs leading-5 text-amber-700">
               研究分析建議先篩選：國中學生 × 正式課堂學習，再依動物界分類經驗分組。
             </div>
@@ -728,8 +876,11 @@ export default function TeacherDecisionPage() {
                     {decisions.interventionStudents.length === 0 ? (
                       <div className="text-sm text-gray-500">目前沒有高風險學生。</div>
                     ) : (
-                      decisions.interventionStudents.map(({ student, reasons, question }) => (
-                        <div key={student.participantCode} className="rounded-2xl border border-gray-200 bg-white p-4">
+                      decisions.interventionStudents.map(({ student, reasons, question }, index) => (
+                        <div
+                          key={`${student.participantCode}-${index}`}
+                          className="rounded-2xl border border-gray-200 bg-white p-4"
+                        >
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="font-bold text-gray-900">
                               {student.maskedName || '未具名'}
@@ -1039,10 +1190,10 @@ export default function TeacherDecisionPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.studentRows.map((student) => {
+                    {data.studentRows.map((student, index) => {
                       const diag = diagnoseStudent(student)
                       return (
-                        <tr key={student.participantCode} className="rounded-2xl bg-gray-50 align-top">
+                        <tr key={`${student.participantCode}-${index}`} className="rounded-2xl bg-gray-50 align-top">
                           <td className="px-3 py-3">
                             <div className="font-semibold text-gray-900">
   {student.maskedName || '未具名'}

@@ -14,7 +14,13 @@ import {
   evidenceQuestions,
 } from '../lib/questions'
 
-type AppStage = 'stage1' | 'awareness' | 'evidence' | 'transfer' | 'done'
+import {
+  RUBRIC_VERSION as ITEM_RUBRIC_VERSION,
+  type CriterionQuality,
+} from '../lib/itemRubrics'
+import { scoreCriterionQuality } from '../lib/scoring'
+
+type AppStage = 'stage1' | 'reflection' | 'guide' | 'evidence' | 'transfer' | 'done'
 
 const SIX_PHYLA = [
   '刺絲胞動物門',
@@ -44,20 +50,57 @@ type EvidenceResponse = {
   questionId: string
   animalName: string
   answer: SixPhylum
-  selectedFeatures: string[]
 
-  // v10 後新增：記錄當題實際呈現給學生的特徵選項
+  /**
+   * P0-1 暫時仍使用原本 UI 的 selectedFeatures。
+   * 目前先把 selectedFeatures[0] 當 primaryFeature。
+   * 下一輪再把 UI 改成「主要判準單選 + 次要判準複選」。
+   */
+  selectedFeatures: string[]
+  primaryFeature?: string
+  secondaryFeatures?: string[]
+
   featureOptionsShown?: string[]
+  featureOptionOrder?: string[]
+  randomSeed?: string
   maxSelectableFeatures?: number
   featureOptionVersion?: string
 
   reasonText: string
+  exclusionReasonText?: string
+
   confidence: number
+  familiarity?: 1 | 2 | 3 | 4
+  learnedBefore?: 'yes' | 'no' | 'unsure'
+
+  criterionQuality?: CriterionQuality
+  diagnosticHitCount?: number
+  acceptableHitCount?: number
+  auxiliaryCount?: number
+  misleadingCount?: number
+  highConfidenceError?: boolean
+  scoringRubricVersion?: string | null
 }
+
+type PlatformMode =
+  | 'research_formal'
+  | 'teaching_demo'
+  | 'dev_test'
+
+type DataUseScope =
+  | 'main_research'
+  | 'teaching_only'
+  | 'excluded_test'
+
+type FeatureDisplayMode = 'research_blind' | 'learning_grouped'
+
+type FamiliarityLevel = 1 | 2 | 3 | 4
+type LearnedBefore = 'yes' | 'no' | 'unsure'
 
 type EnterSession = {
   studentId?: string
   schoolCode: string
+  schoolDisplayName?: string
   schoolYear: string
   semester: string
   grade: string
@@ -65,9 +108,23 @@ type EnterSession = {
   seatNo: string
   maskedName?: string
   enteredAt?: string
+  entryMode?: 'roster' | 'manual'
+  platformMode?: PlatformMode
+  dataUseScope?: DataUseScope
+  taskVariant?: 'formal' | 'demo' | string
+  formalRosterImported?: boolean
+  appVersion?: string
+  itemBankVersion?: string
+  rubricVersion?: string
+  consentVersion?: string
+  assentAccepted?: boolean
   userRole?: string
   useContext?: string
   animalClassificationExperience?: string
+  learningExperience?: 'before' | 'during' | 'after' | 'unsure'
+  learningExperienceLabel?: string
+  researchMode?: string
+  researchEntryVersion?: string
 }
 
 type GuideCard = {
@@ -114,16 +171,32 @@ type LearningItemLog = {
   submittedAt: string
   durationMs: number | null
   finalAnswer: SixPhylum
-  selectedFeatures: string[]
 
-  // v10 後新增：記錄當題實際呈現給學生的特徵選項
+  selectedFeatures: string[]
+  primaryFeature?: string
+  secondaryFeatures?: string[]
+
   featureOptionsShown?: string[]
+  featureOptionOrder?: string[]
+  randomSeed?: string
   maxSelectableFeatures?: number
   featureOptionVersion?: string
 
   reasonText: string
+  exclusionReasonText?: string
+
   confidence: number
+  familiarity?: 1 | 2 | 3 | 4
+  learnedBefore?: 'yes' | 'no' | 'unsure'
+
   isCorrect: boolean | null
+  criterionQuality?: CriterionQuality
+  diagnosticHitCount?: number
+  acceptableHitCount?: number
+  auxiliaryCount?: number
+  misleadingCount?: number
+  highConfidenceError?: boolean
+  scoringRubricVersion?: string | null
 }
 
 type LearningEventLog = {
@@ -148,39 +221,67 @@ function getTrimmedLength(value: string) {
   return String(value ?? '').trim().length
 }
 
+function buildSelectedFeatures(
+  primaryFeature: string,
+  secondaryFeatures: string[],
+  options: string[],
+  maxSecondary = 2
+) {
+  const primary = options.includes(primaryFeature) ? primaryFeature : ''
+  const secondary = secondaryFeatures
+    .filter((feature) => options.includes(feature))
+    .filter((feature) => feature !== primary)
+    .slice(0, maxSecondary)
+
+  return primary ? [primary, ...secondary] : secondary
+}
+
 const STAGE_ITEMS: {
   key: AppStage
+  stageLabel: string
   studentLabel: string
   teacherLabel: string
   fiveELabel: string
 }[] = [
   {
     key: 'stage1',
+    stageLabel: '第 1 階段',
     studentLabel: '自由分類',
     teacherLabel: '先備概念外顯',
     fiveELabel: '5E: Engage',
   },
   {
-    key: 'awareness',
-    studentLabel: '判準建立',
-    teacherLabel: '分類規則建立',
-    fiveELabel: '5E: Explore → Explain',
+    key: 'reflection',
+    stageLabel: '第 2 階段',
+    studentLabel: '線索反思',
+    teacherLabel: '線索反思與判準區分',
+    fiveELabel: '5E: Explore',
+  },
+  {
+    key: 'guide',
+    stageLabel: '第 3 階段',
+    studentLabel: '六門提示卡',
+    teacherLabel: '標準判準學習與就緒檢核',
+    fiveELabel: '5E: Explain',
   },
   {
     key: 'evidence',
+    stageLabel: '第 4 階段',
     studentLabel: '帶提示判定',
-    teacherLabel: '鷹架化判定',
+    teacherLabel: '鷹架支持下表現',
     fiveELabel: '5E: Elaborate (Scaffolded)',
   },
   {
     key: 'transfer',
+    stageLabel: '第 5 階段',
     studentLabel: '遷移應用',
-    teacherLabel: '學習遷移評量',
-    fiveELabel: '5E: Elaborate (Transfer)',
+    teacherLabel: '撤除完整提示後的遷移表現',
+    fiveELabel: '5E: Elaborate → Evaluate',
   },
   {
     key: 'done',
-    studentLabel: '結果回饋',
+    stageLabel: '第 6 階段',
+    studentLabel: '診斷回饋',
     teacherLabel: '形成性回饋與歷程分析',
     fiveELabel: '5E: Evaluate',
   },
@@ -705,6 +806,9 @@ const FEATURE_BANK = [
 ]
 
 const FEATURE_OPTION_VERSION = '2026-04-26-v1'
+const APP_VERSION = 'app-2026-04-28-formal-readiness-neutral-v1'
+const ITEM_BANK_VERSION = 'itembank-2026-04-27-v1'
+const RUBRIC_VERSION = ITEM_RUBRIC_VERSION
 
 const ALLOW_POST_FEEDBACK_RETRY = false
 
@@ -755,6 +859,23 @@ function getCueProfile(features: string[]) {
     structuralCount,
     surfaceCount,
   }
+}
+
+function isFormalResearchSession(session: EnterSession | null) {
+  return (
+    session?.entryMode === 'roster' &&
+    session?.platformMode === 'research_formal' &&
+    session?.dataUseScope === 'main_research' &&
+    session?.formalRosterImported === true &&
+    session?.userRole === '國中學生' &&
+    session?.useContext === '正式課堂學習'
+  )
+}
+
+function getResearchModeLabel(session: EnterSession | null) {
+  if (isFormalResearchSession(session)) return '正式研究版'
+  if (session?.platformMode === 'teaching_demo') return '課程體驗版'
+  return '未標記模式'
 }
 
 function getConfidenceText(confidence: number | null | undefined) {
@@ -859,6 +980,59 @@ function shuffleArray<T>(items: T[]) {
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
   return arr
+}
+
+function hashStringToSeed(input: string) {
+  let hash = 2166136261
+
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return hash >>> 0
+}
+
+function seededRandom(seed: number) {
+  let state = seed >>> 0
+
+  return function nextRandom() {
+    state += 0x6d2b79f5
+    let value = state
+    value = Math.imul(value ^ (value >>> 15), value | 1)
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function seededShuffleArray<T>(items: T[], seedText: string) {
+  const arr = [...items]
+  const random = seededRandom(hashStringToSeed(seedText))
+
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+
+  return arr
+}
+
+function buildParticipantSeedBase(session: EnterSession | null) {
+  return (
+    session?.studentId ||
+    [
+      session?.schoolCode,
+      session?.schoolYear,
+      session?.semester,
+      session?.grade,
+      session?.className,
+      session?.seatNo,
+      session?.enteredAt,
+    ]
+      .filter(Boolean)
+      .join('-') ||
+    'anonymous'
+  )
 }
 
 function getCardName(cardId: string) {
@@ -1045,7 +1219,7 @@ function StepHeader({
                           : 'bg-gray-100 text-gray-600'
                     }`}
                   >
-                    第 {index + 1} 階段
+                    {item.stageLabel}
                   </span>
 
                   <span className="text-sm font-bold leading-5">
@@ -1078,11 +1252,13 @@ function FeatureCheckboxes({
   selected,
   onChange,
   maxSelected,
+  displayMode = 'learning_grouped',
 }: {
   options: string[]
   selected: string[]
   onChange: (next: string[]) => void
   maxSelected?: number
+  displayMode?: FeatureDisplayMode
 }) {
   const visibleSelected = selected.filter((feature) => options.includes(feature))
 
@@ -1136,7 +1312,16 @@ function FeatureCheckboxes({
         </div>
       ) : null}
 
-      {coreOptions.length > 0 ? (
+      {displayMode === 'research_blind' ? (
+        <div>
+          <div className="mb-2 text-sm font-bold text-gray-800">本題可用線索</div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {options.map(renderOption)}
+          </div>
+        </div>
+      ) : null}
+
+      {displayMode === 'learning_grouped' && coreOptions.length > 0 ? (
         <div>
           <div className="mb-2 text-sm font-bold text-gray-800">核心結構特徵</div>
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -1145,7 +1330,7 @@ function FeatureCheckboxes({
         </div>
       ) : null}
 
-      {supportingOptions.length > 0 ? (
+      {displayMode === 'learning_grouped' && supportingOptions.length > 0 ? (
         <div>
           <div className="mb-2 text-sm font-bold text-gray-800">
             輔助或容易誤用的線索
@@ -1156,7 +1341,7 @@ function FeatureCheckboxes({
         </div>
       ) : null}
 
-      {otherOptions.length > 0 ? (
+      {displayMode === 'learning_grouped' && otherOptions.length > 0 ? (
         <div>
           <div className="mb-2 text-sm font-bold text-gray-800">其他線索</div>
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -1164,6 +1349,184 @@ function FeatureCheckboxes({
           </div>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function ResearchCriterionSelector({
+  options,
+  primaryFeature,
+  secondaryFeatures,
+  onPrimaryChange,
+  onSecondaryChange,
+  maxSecondary = 2,
+}: {
+  options: string[]
+  primaryFeature: string
+  secondaryFeatures: string[]
+  onPrimaryChange: (feature: string) => void
+  onSecondaryChange: (features: string[]) => void
+  maxSecondary?: number
+}) {
+  const visibleSecondary = secondaryFeatures
+    .filter((feature) => options.includes(feature))
+    .filter((feature) => feature !== primaryFeature)
+    .slice(0, maxSecondary)
+
+  function toggleSecondary(feature: string) {
+    if (feature === primaryFeature) return
+
+    if (visibleSecondary.includes(feature)) {
+      onSecondaryChange(visibleSecondary.filter((item) => item !== feature))
+      return
+    }
+
+    if (visibleSecondary.length >= maxSecondary) return
+
+    onSecondaryChange([...visibleSecondary, feature])
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+        請先選出 1 個「最主要判準」，再視需要選 0–2 個「次要判準」。
+        系統會記錄主要與次要判準，作為研究分析資料。
+      </div>
+
+      <div>
+        <div className="mb-2 text-lg font-black text-gray-900">
+          主要判準：如果只能選一個，你最主要依據哪個特徵？
+        </div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {options.map((feature) => (
+            <label
+              key={`primary-${feature}`}
+              className={`flex items-start gap-2 rounded-lg border p-2 text-sm ${
+                primaryFeature === feature
+                  ? 'border-black bg-gray-50'
+                  : 'border-gray-200 bg-white text-gray-800'
+              }`}
+            >
+              <input
+                type="radio"
+                name="primary-feature"
+                checked={primaryFeature === feature}
+                onChange={() => {
+                  onPrimaryChange(feature)
+                  onSecondaryChange(visibleSecondary.filter((item) => item !== feature))
+                }}
+                className="mt-1"
+              />
+              <span>{feature}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-lg font-black text-gray-900">
+          次要判準：還有哪些特徵有幫助？最多再選 {maxSecondary} 項
+        </div>
+        <div className="mb-2 text-sm text-gray-600">
+          目前已選 {visibleSecondary.length} / {maxSecondary} 項。
+        </div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {options.map((feature) => {
+            const checked = visibleSecondary.includes(feature)
+            const isPrimary = feature === primaryFeature
+            const reachedLimit = visibleSecondary.length >= maxSecondary
+            const disabled = isPrimary || (!checked && reachedLimit)
+
+            return (
+              <label
+                key={`secondary-${feature}`}
+                className={`flex items-start gap-2 rounded-lg border p-2 text-sm ${
+                  checked
+                    ? 'border-black bg-gray-50'
+                    : disabled
+                      ? 'border-gray-200 bg-gray-100 text-gray-400'
+                      : 'border-gray-200 bg-white text-gray-800'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={() => toggleSecondary(feature)}
+                  className="mt-1"
+                />
+                <span>
+                  {feature}
+                  {isPrimary ? '（已作為主要判準）' : ''}
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FamiliarityAndLearningControls({
+  familiarity,
+  setFamiliarity,
+  learnedBefore,
+  setLearnedBefore,
+}: {
+  familiarity: FamiliarityLevel | null
+  setFamiliarity: (value: FamiliarityLevel) => void
+  learnedBefore: LearnedBefore
+  setLearnedBefore: (value: LearnedBefore) => void
+}) {
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <div className="rounded-xl border border-gray-200 p-4">
+        <div className="mb-3 text-lg font-black text-gray-900">
+          你以前看過這種動物嗎？
+        </div>
+        <div className="space-y-2">
+          {[
+            [1, '完全沒看過'],
+            [2, '好像看過'],
+            [3, '看過，但不熟'],
+            [4, '很熟悉'],
+          ].map(([value, label]) => (
+            <label key={value} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="familiarity"
+                checked={familiarity === value}
+                onChange={() => setFamiliarity(value as FamiliarityLevel)}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 p-4">
+        <div className="mb-3 text-lg font-black text-gray-900">
+          你是否曾在課本或課堂學過這種動物？
+        </div>
+        <div className="space-y-2">
+          {[
+            ['yes', '有學過'],
+            ['no', '沒有學過'],
+            ['unsure', '不確定'],
+          ].map(([value, label]) => (
+            <label key={value} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="learned-before"
+                checked={learnedBefore === value}
+                onChange={() => setLearnedBefore(value as LearnedBefore)}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -1428,8 +1791,13 @@ export default function Page() {
   const [evidenceIndex, setEvidenceIndex] = useState(0)
   const [evidenceAnswer, setEvidenceAnswer] = useState<SixPhylum | ''>('')
   const [evidenceSelectedFeatures, setEvidenceSelectedFeatures] = useState<string[]>([])
+  const [evidencePrimaryFeature, setEvidencePrimaryFeature] = useState('')
+  const [evidenceSecondaryFeatures, setEvidenceSecondaryFeatures] = useState<string[]>([])
   const [evidenceReasonText, setEvidenceReasonText] = useState('')
-  const [evidenceConfidence, setEvidenceConfidence] = useState(2)
+  const [evidenceExclusionReasonText, setEvidenceExclusionReasonText] = useState('')
+  const [evidenceConfidence, setEvidenceConfidence] = useState(3)
+  const [evidenceFamiliarity, setEvidenceFamiliarity] = useState<FamiliarityLevel | null>(null)
+  const [evidenceLearnedBefore, setEvidenceLearnedBefore] = useState<LearnedBefore>('unsure')
   const [evidenceResponses, setEvidenceResponses] = useState<EvidenceResponse[]>([])
   const [evidenceItemLogs, setEvidenceItemLogs] = useState<LearningItemLog[]>([])
   const [eventLogs, setEventLogs] = useState<LearningEventLog[]>([])
@@ -1437,8 +1805,13 @@ export default function Page() {
   const [transferIndex, setTransferIndex] = useState(0)
   const [transferAnswer, setTransferAnswer] = useState<SixPhylum | ''>('')
   const [transferSelectedFeatures, setTransferSelectedFeatures] = useState<string[]>([])
+  const [transferPrimaryFeature, setTransferPrimaryFeature] = useState('')
+  const [transferSecondaryFeatures, setTransferSecondaryFeatures] = useState<string[]>([])
   const [transferReasonText, setTransferReasonText] = useState('')
-  const [transferConfidence, setTransferConfidence] = useState(2)
+  const [transferExclusionReasonText, setTransferExclusionReasonText] = useState('')
+  const [transferConfidence, setTransferConfidence] = useState(3)
+  const [transferFamiliarity, setTransferFamiliarity] = useState<FamiliarityLevel | null>(null)
+  const [transferLearnedBefore, setTransferLearnedBefore] = useState<LearnedBefore>('unsure')
   const [transferResponses, setTransferResponses] = useState<EvidenceResponse[]>([])
   const [transferItemLogs, setTransferItemLogs] = useState<LearningItemLog[]>([])
 
@@ -1459,15 +1832,48 @@ export default function Page() {
   const currentEvidence = stage3EvidenceQuestions[evidenceIndex]
   const currentTransfer = transferQuestions[transferIndex]
 
-  const currentEvidenceFeatureOptions = useMemo(
-  () => getQuestionFeatureOptions(currentEvidence as QuestionLike),
-  [currentEvidence?.id]
-)
+  const participantSeedBase = useMemo(
+    () => buildParticipantSeedBase(enterSession),
+    [enterSession]
+  )
 
-const currentTransferFeatureOptions = useMemo(
-  () => getQuestionFeatureOptions(currentTransfer),
-  [currentTransfer?.id]
-)
+  const currentEvidenceRandomSeed = useMemo(
+    () =>
+      currentEvidence
+        ? `${participantSeedBase}::${currentEvidence.id}::evidence::${FEATURE_OPTION_VERSION}`
+        : '',
+    [currentEvidence?.id, participantSeedBase]
+  )
+
+  const currentTransferRandomSeed = useMemo(
+    () =>
+      currentTransfer
+        ? `${participantSeedBase}::${currentTransfer.id}::transfer::${FEATURE_OPTION_VERSION}`
+        : '',
+    [currentTransfer?.id, participantSeedBase]
+  )
+
+  const currentEvidenceFeatureOptions = useMemo(
+    () =>
+      currentEvidence
+        ? seededShuffleArray(
+            getQuestionFeatureOptions(currentEvidence as QuestionLike),
+            currentEvidenceRandomSeed
+          )
+        : [],
+    [currentEvidence?.id, currentEvidenceRandomSeed]
+  )
+
+  const currentTransferFeatureOptions = useMemo(
+    () =>
+      currentTransfer
+        ? seededShuffleArray(
+            getQuestionFeatureOptions(currentTransfer),
+            currentTransferRandomSeed
+          )
+        : [],
+    [currentTransfer?.id, currentTransferRandomSeed]
+  )
 
   const isDev = process.env.NODE_ENV === 'development'
 
@@ -1542,6 +1948,9 @@ const currentTransferFeatureOptions = useMemo(
       ? `${participantCode}:${enterSession.enteredAt}`
       : participantCode
 
+  const formalResearchMode = isFormalResearchSession(enterSession)
+  const researchModeLabel = getResearchModeLabel(enterSession)
+
   useEffect(() => {
     if (!participantCode || participantCode === 'anonymous' || progressHydrated) return
 
@@ -1559,7 +1968,8 @@ const currentTransferFeatureOptions = useMemo(
         return
       }
 
-      const savedStage: AppStage = saved.stage ?? 'stage1'
+      const savedStageRaw = saved.stage ?? 'stage1'
+      const savedStage = (savedStageRaw === 'awareness' ? 'reflection' : savedStageRaw) as AppStage
       const savedEvidenceResponses: EvidenceResponse[] = saved.evidenceResponses ?? []
       const savedTransferResponses: EvidenceResponse[] = saved.transferResponses ?? []
 
@@ -1589,25 +1999,47 @@ const currentTransferFeatureOptions = useMemo(
       setEventLogs(saved.eventLogs ?? [])
 
       if (savedStage === 'evidence') {
+        const draftSelected = savedEvidenceDraft?.selectedFeatures ?? []
+        const draftPrimary = savedEvidenceDraft?.primaryFeature ?? draftSelected[0] ?? ''
+        const draftSecondary =
+          savedEvidenceDraft?.secondaryFeatures ??
+          draftSelected.filter((feature: string) => feature !== draftPrimary).slice(0, 2)
+
         setEvidenceIndex(
           savedEvidenceDraft?.index ??
             Math.min(savedEvidenceResponses.length, stage3EvidenceQuestions.length - 1)
         )
         setEvidenceAnswer(savedEvidenceDraft?.answer ?? '')
-        setEvidenceSelectedFeatures(savedEvidenceDraft?.selectedFeatures ?? [])
+        setEvidenceSelectedFeatures(draftSelected)
+        setEvidencePrimaryFeature(draftPrimary)
+        setEvidenceSecondaryFeatures(draftSecondary)
         setEvidenceReasonText(savedEvidenceDraft?.reasonText ?? '')
-        setEvidenceConfidence(savedEvidenceDraft?.confidence ?? 2)
+        setEvidenceExclusionReasonText(savedEvidenceDraft?.exclusionReasonText ?? '')
+        setEvidenceConfidence(savedEvidenceDraft?.confidence ?? 3)
+        setEvidenceFamiliarity(savedEvidenceDraft?.familiarity ?? null)
+        setEvidenceLearnedBefore(savedEvidenceDraft?.learnedBefore ?? 'unsure')
       }
 
       if (savedStage === 'transfer') {
+        const draftSelected = savedTransferDraft?.selectedFeatures ?? []
+        const draftPrimary = savedTransferDraft?.primaryFeature ?? draftSelected[0] ?? ''
+        const draftSecondary =
+          savedTransferDraft?.secondaryFeatures ??
+          draftSelected.filter((feature: string) => feature !== draftPrimary).slice(0, 2)
+
         setTransferIndex(
           savedTransferDraft?.index ??
             Math.min(savedTransferResponses.length, transferQuestions.length - 1)
         )
         setTransferAnswer(savedTransferDraft?.answer ?? '')
-        setTransferSelectedFeatures(savedTransferDraft?.selectedFeatures ?? [])
+        setTransferSelectedFeatures(draftSelected)
+        setTransferPrimaryFeature(draftPrimary)
+        setTransferSecondaryFeatures(draftSecondary)
         setTransferReasonText(savedTransferDraft?.reasonText ?? '')
-        setTransferConfidence(savedTransferDraft?.confidence ?? 2)
+        setTransferExclusionReasonText(savedTransferDraft?.exclusionReasonText ?? '')
+        setTransferConfidence(savedTransferDraft?.confidence ?? 3)
+        setTransferFamiliarity(savedTransferDraft?.familiarity ?? null)
+        setTransferLearnedBefore(savedTransferDraft?.learnedBefore ?? 'unsure')
       }
 
       setProgressHydrated(true)
@@ -1643,16 +2075,36 @@ const currentTransferFeatureOptions = useMemo(
   evidenceDraft: {
     index: evidenceIndex,
     answer: evidenceAnswer,
-    selectedFeatures: evidenceSelectedFeatures,
+    selectedFeatures: buildSelectedFeatures(
+      evidencePrimaryFeature,
+      evidenceSecondaryFeatures,
+      currentEvidenceFeatureOptions,
+      2
+    ),
+    primaryFeature: evidencePrimaryFeature,
+    secondaryFeatures: evidenceSecondaryFeatures,
     reasonText: evidenceReasonText,
+    exclusionReasonText: evidenceExclusionReasonText,
     confidence: evidenceConfidence,
+    familiarity: evidenceFamiliarity,
+    learnedBefore: evidenceLearnedBefore,
   },
   transferDraft: {
     index: transferIndex,
     answer: transferAnswer,
-    selectedFeatures: transferSelectedFeatures,
+    selectedFeatures: buildSelectedFeatures(
+      transferPrimaryFeature,
+      transferSecondaryFeatures,
+      currentTransferFeatureOptions,
+      2
+    ),
+    primaryFeature: transferPrimaryFeature,
+    secondaryFeatures: transferSecondaryFeatures,
     reasonText: transferReasonText,
+    exclusionReasonText: transferExclusionReasonText,
     confidence: transferConfidence,
+    familiarity: transferFamiliarity,
+    learnedBefore: transferLearnedBefore,
   },
   savedAt: new Date().toISOString(),
 }
@@ -1682,17 +2134,29 @@ const currentTransferFeatureOptions = useMemo(
     evidenceIndex,
     evidenceAnswer,
     evidenceSelectedFeatures,
+    evidencePrimaryFeature,
+    evidenceSecondaryFeatures,
     evidenceReasonText,
+    evidenceExclusionReasonText,
     evidenceConfidence,
+    evidenceFamiliarity,
+    evidenceLearnedBefore,
+    currentEvidenceFeatureOptions,
     transferIndex,
     transferAnswer,
     transferSelectedFeatures,
+    transferPrimaryFeature,
+    transferSecondaryFeatures,
     transferReasonText,
+    transferExclusionReasonText,
     transferConfidence,
+    transferFamiliarity,
+    transferLearnedBefore,
+    currentTransferFeatureOptions,
   ])
 
   useEffect(() => {
-    if (stage !== 'awareness') {
+    if (stage !== 'guide') {
       awarenessStartedAtRef.current = null
       return
     }
@@ -1792,9 +2256,15 @@ const currentTransferFeatureOptions = useMemo(
   const featureChoiceComplete = diagnosticFeatures.length + possibleFeatures.length > 0
   const awarenessABComplete = reflectionComplete && featureChoiceComplete
 
-  const readinessComplete = READINESS_CHECKS.every(
-    (item) => readinessAnswers[item.id] === item.correct
+  const readinessAllAnswered = READINESS_CHECKS.every(
+    (item) => Boolean(readinessAnswers[item.id])
   )
+
+  const readinessCorrectCount = READINESS_CHECKS.filter(
+    (item) => readinessAnswers[item.id] === item.correct
+  ).length
+
+  const readinessComplete = readinessAllAnswered
 
   const awarenessComplete =
   reflectionComplete &&
@@ -1808,35 +2278,69 @@ const currentTransferFeatureOptions = useMemo(
   const maxUnlockedIndex = useMemo(() => {
     let next = 0
     if (stage1Complete) next = 1
-    if (stage1Complete && awarenessComplete) next = 2
-    if (stage1Complete && awarenessComplete && evidenceAllComplete) next = 3
-    if (stage1Complete && awarenessComplete && evidenceAllComplete && transferAllComplete) next = 4
+    if (stage1Complete && awarenessABComplete) next = 2
+    if (stage1Complete && awarenessABComplete && awarenessComplete) next = 3
+    if (
+      stage1Complete &&
+      awarenessABComplete &&
+      awarenessComplete &&
+      evidenceAllComplete
+    ) {
+      next = 4
+    }
+    if (
+      stage1Complete &&
+      awarenessABComplete &&
+      awarenessComplete &&
+      evidenceAllComplete &&
+      transferAllComplete
+    ) {
+      next = 5
+    }
     return next
-  }, [stage1Complete, awarenessComplete, evidenceAllComplete, transferAllComplete])
+  }, [
+    stage1Complete,
+    awarenessABComplete,
+    awarenessComplete,
+    evidenceAllComplete,
+    transferAllComplete,
+  ])
 
   const visibleEvidenceSelectedFeatures = currentEvidence
-  ? evidenceSelectedFeatures.filter((feature) =>
-      currentEvidenceFeatureOptions.includes(feature)
+  ? buildSelectedFeatures(
+      evidencePrimaryFeature,
+      evidenceSecondaryFeatures,
+      currentEvidenceFeatureOptions,
+      2
     )
   : []
 
 const visibleTransferSelectedFeatures = currentTransfer
-  ? transferSelectedFeatures.filter((feature) =>
-      currentTransferFeatureOptions.includes(feature)
+  ? buildSelectedFeatures(
+      transferPrimaryFeature,
+      transferSecondaryFeatures,
+      currentTransferFeatureOptions,
+      2
     )
   : []
 
 const evidenceFormComplete =
   Boolean(evidenceAnswer) &&
+  Boolean(evidencePrimaryFeature) &&
   visibleEvidenceSelectedFeatures.length > 0 &&
   visibleEvidenceSelectedFeatures.length <= 3 &&
-  evidenceReasonText.trim().length >= 8
+  evidenceReasonText.trim().length >= 8 &&
+  evidenceExclusionReasonText.trim().length >= 6 &&
+  evidenceFamiliarity !== null
 
 const transferFormComplete =
   Boolean(transferAnswer) &&
+  Boolean(transferPrimaryFeature) &&
   visibleTransferSelectedFeatures.length > 0 &&
-  visibleTransferSelectedFeatures.length <= 2 &&
-  transferReasonText.trim().length >= 8
+  visibleTransferSelectedFeatures.length <= 3 &&
+  transferReasonText.trim().length >= 8 &&
+  transferExclusionReasonText.trim().length >= 6 &&
+  transferFamiliarity !== null
 
   const diagnosticCount = diagnosticFeatures.length
   const possibleCount = possibleFeatures.length
@@ -1898,12 +2402,12 @@ const stage5Rows = useMemo(
   () => [
     ...evidenceResultRows.map((row) => ({
       ...row,
-      stageLabel: '第 3 階段',
+      stageLabel: '第 4 階段',
       confidence: evidenceConfidenceMap[row.questionId] ?? null,
     })),
     ...transferResultRows.map((row) => ({
       ...row,
-      stageLabel: '第 4 階段',
+      stageLabel: '第 5 階段',
       confidence: transferConfidenceMap[row.questionId] ?? null,
     })),
   ],
@@ -1970,6 +2474,283 @@ const stage5ReviewPhyla = useMemo(() => {
 
   return Array.from(new Set(wrongAnswers)).slice(0, 2)
 }, [stage5Rows])
+
+
+const researchDataQualityFlags = useMemo(() => {
+  const allResponses = [
+    ...evidenceResponses.map((item) => ({ ...item, stage: 'evidence' as const })),
+    ...transferResponses.map((item) => ({ ...item, stage: 'transfer' as const })),
+  ]
+
+  const allItemLogs = [...evidenceItemLogs, ...transferItemLogs]
+  const expectedEvidenceCount = stage3EvidenceQuestions.length
+  const expectedTransferCount = transferQuestions.length
+  const expectedTotalCount = expectedEvidenceCount + expectedTransferCount
+  const answeredTotalCount = allResponses.length
+
+  const evidenceComplete = evidenceResponses.length === expectedEvidenceCount
+  const transferComplete = transferResponses.length === expectedTransferCount
+  const allFormalItemsCompleted = evidenceComplete && transferComplete
+
+  const missingReasonItems = allResponses
+    .filter(
+      (item) =>
+        item.reasonText.trim().length < 8 ||
+        (item.exclusionReasonText ?? '').trim().length < 6
+    )
+    .map((item) => ({
+      stage: item.stage,
+      questionId: item.questionId,
+      animalName: item.animalName,
+    }))
+
+  const missingResearchFieldItems = allResponses
+    .filter(
+      (item) =>
+        !item.primaryFeature ||
+        item.familiarity == null ||
+        !item.learnedBefore
+    )
+    .map((item) => ({
+      stage: item.stage,
+      questionId: item.questionId,
+      animalName: item.animalName,
+    }))
+
+  const missingScoringItems = allResponses
+    .filter(
+      (item) =>
+        !item.scoringRubricVersion ||
+        !item.criterionQuality
+    )
+    .map((item) => ({
+      stage: item.stage,
+      questionId: item.questionId,
+      animalName: item.animalName,
+    }))
+
+  const tooFastItemLogs = allItemLogs
+    .filter((item) => item.durationMs != null && item.durationMs < 5000)
+    .map((item) => ({
+      stage: item.stage,
+      questionId: item.questionId,
+      animalName: item.animalName,
+      durationMs: item.durationMs,
+    }))
+
+  const veryLongItemLogs = allItemLogs
+    .filter((item) => item.durationMs != null && item.durationMs > 10 * 60 * 1000)
+    .map((item) => ({
+      stage: item.stage,
+      questionId: item.questionId,
+      animalName: item.animalName,
+      durationMs: item.durationMs,
+    }))
+
+  const answerCounts = allResponses.reduce<Record<string, number>>((acc, item) => {
+    acc[item.answer] = (acc[item.answer] ?? 0) + 1
+    return acc
+  }, {})
+
+  const confidenceCounts = allResponses.reduce<Record<string, number>>((acc, item) => {
+    const key = String(item.confidence)
+    acc[key] = (acc[key] ?? 0) + 1
+    return acc
+  }, {})
+
+  const maxAnswerCount = Math.max(0, ...Object.values(answerCounts))
+  const maxConfidenceCount = Math.max(0, ...Object.values(confidenceCounts))
+
+  const dominantAnswerRate =
+    answeredTotalCount > 0 ? maxAnswerCount / answeredTotalCount : null
+
+  const dominantConfidenceRate =
+    answeredTotalCount > 0 ? maxConfidenceCount / answeredTotalCount : null
+
+  const allSameAnswer =
+    answeredTotalCount >= 4 && Object.keys(answerCounts).length === 1
+
+  const allSameConfidence =
+    answeredTotalCount >= 4 && Object.keys(confidenceCounts).length === 1
+
+  const highConfidenceErrorCount = allResponses.filter(
+    (item) => item.highConfidenceError === true
+  ).length
+
+  const baseExclusionReasons = [
+    enterSession?.entryMode === 'roster' ? null : 'not_roster_entry',
+    enterSession?.platformMode === 'research_formal' ? null : 'not_research_formal',
+    enterSession?.dataUseScope === 'main_research' ? null : 'not_main_research',
+    enterSession?.formalRosterImported === true ? null : 'formal_roster_not_imported',
+    enterSession?.userRole === '國中學生' ? null : 'not_junior_high_student',
+    enterSession?.useContext === '正式課堂學習' ? null : 'not_formal_classroom_use',
+    enterSession?.learningExperience || enterSession?.animalClassificationExperience
+      ? null
+      : 'missing_learning_experience',
+  ].filter(Boolean)
+
+  const qualityExclusionReasons = [
+    allFormalItemsCompleted ? null : 'incomplete_formal_items',
+    missingResearchFieldItems.length === 0 ? null : 'missing_research_fields',
+    missingReasonItems.length === 0 ? null : 'missing_reason_text',
+    missingScoringItems.length === 0 ? null : 'missing_scoring_fields',
+    tooFastItemLogs.length === 0 ? null : 'too_fast_item_response_detected',
+    allSameAnswer ? 'all_same_answer_pattern' : null,
+    allSameConfidence ? 'all_same_confidence_pattern' : null,
+  ].filter(Boolean)
+
+  const includedInMainResearch =
+    formalResearchMode &&
+    allFormalItemsCompleted &&
+    missingResearchFieldItems.length === 0 &&
+    missingReasonItems.length === 0 &&
+    missingScoringItems.length === 0 &&
+    tooFastItemLogs.length === 0 &&
+    !allSameAnswer &&
+    !allSameConfidence
+
+  return {
+    includedInMainResearch,
+    formalRosterImported: enterSession?.formalRosterImported === true,
+    isFormalJuniorHighStudent: enterSession?.userRole === '國中學生',
+    isFormalClassroomUse: enterSession?.useContext === '正式課堂學習',
+    isRosterEntry: enterSession?.entryMode === 'roster',
+    isTeachingDemo: enterSession?.platformMode === 'teaching_demo',
+    learningExperiencePresent:
+      Boolean(enterSession?.learningExperience) ||
+      Boolean(enterSession?.animalClassificationExperience),
+    platformMode: enterSession?.platformMode ?? 'unknown',
+    dataUseScope: enterSession?.dataUseScope ?? 'unknown',
+    researchMode: enterSession?.researchMode ?? 'unknown',
+    learningExperience:
+      enterSession?.learningExperience ?? 'unknown',
+    learningExperienceLabel:
+      enterSession?.learningExperienceLabel ??
+      enterSession?.animalClassificationExperience ??
+      'unknown',
+    currentAppStage: stage,
+    completeness: {
+      evidenceComplete,
+      transferComplete,
+      allFormalItemsCompleted,
+      expectedEvidenceCount,
+      expectedTransferCount,
+      expectedTotalCount,
+      answeredTotalCount,
+      evidenceAnsweredCount: evidenceResponses.length,
+      transferAnsweredCount: transferResponses.length,
+    },
+    fieldCompleteness: {
+      missingReasonItems,
+      missingResearchFieldItems,
+      missingScoringItems,
+      missingReasonItemCount: missingReasonItems.length,
+      missingResearchFieldItemCount: missingResearchFieldItems.length,
+      missingScoringItemCount: missingScoringItems.length,
+    },
+    timingFlags: {
+      tooFastThresholdMs: 5000,
+      veryLongThresholdMs: 10 * 60 * 1000,
+      tooFastItemLogs,
+      veryLongItemLogs,
+      tooFastItemCount: tooFastItemLogs.length,
+      veryLongItemCount: veryLongItemLogs.length,
+    },
+    responsePatternFlags: {
+      answerCounts,
+      confidenceCounts,
+      dominantAnswerRate,
+      dominantConfidenceRate,
+      allSameAnswer,
+      allSameConfidence,
+    },
+    scoringFlags: {
+      highConfidenceErrorCount,
+      criterionQualityCounts: allResponses.reduce<Record<string, number>>((acc, item) => {
+        const key = item.criterionQuality ?? 'unknown'
+        acc[key] = (acc[key] ?? 0) + 1
+        return acc
+      }, {}),
+    },
+    exclusionReasons: [
+      ...baseExclusionReasons,
+      ...qualityExclusionReasons,
+    ],
+  }
+}, [
+  enterSession,
+  formalResearchMode,
+  stage,
+  evidenceResponses,
+  transferResponses,
+  evidenceItemLogs,
+  transferItemLogs,
+  stage3EvidenceQuestions.length,
+])
+
+const scoredResponses = useMemo(
+  () => [
+    ...evidenceResponses.map((item) => ({
+      stage: 'evidence' as const,
+      questionId: item.questionId,
+      animalName: item.animalName,
+      answer: item.answer,
+      selectedFeatures: item.selectedFeatures,
+      primaryFeature: item.primaryFeature ?? item.selectedFeatures[0] ?? null,
+      secondaryFeatures:
+        item.secondaryFeatures ??
+        item.selectedFeatures.filter((feature) => feature !== item.selectedFeatures[0]),
+      confidence: item.confidence,
+      reasonText: item.reasonText,
+      exclusionReasonText: item.exclusionReasonText ?? '',
+      familiarity: item.familiarity ?? null,
+      learnedBefore: item.learnedBefore ?? 'unsure',
+      featureOptionsShown: item.featureOptionsShown ?? [],
+      featureOptionOrder: item.featureOptionOrder ?? item.featureOptionsShown ?? [],
+      randomSeed: item.randomSeed ?? null,
+      featureOptionVersion: item.featureOptionVersion ?? FEATURE_OPTION_VERSION,
+      maxSelectableFeatures: item.maxSelectableFeatures ?? 3,
+      score: scoreCriterionQuality({
+        questionId: item.questionId,
+        animalName: item.animalName,
+        selectedFeatures: item.selectedFeatures,
+        primaryFeature: item.primaryFeature ?? item.selectedFeatures[0],
+        answer: item.answer,
+        confidence: item.confidence,
+      }),
+    })),
+    ...transferResponses.map((item) => ({
+      stage: 'transfer' as const,
+      questionId: item.questionId,
+      animalName: item.animalName,
+      answer: item.answer,
+      selectedFeatures: item.selectedFeatures,
+      primaryFeature: item.primaryFeature ?? item.selectedFeatures[0] ?? null,
+      secondaryFeatures:
+        item.secondaryFeatures ??
+        item.selectedFeatures.filter((feature) => feature !== item.selectedFeatures[0]),
+      confidence: item.confidence,
+      reasonText: item.reasonText,
+      exclusionReasonText: item.exclusionReasonText ?? '',
+      familiarity: item.familiarity ?? null,
+      learnedBefore: item.learnedBefore ?? 'unsure',
+      featureOptionsShown: item.featureOptionsShown ?? [],
+      featureOptionOrder: item.featureOptionOrder ?? item.featureOptionsShown ?? [],
+      randomSeed: item.randomSeed ?? null,
+      featureOptionVersion: item.featureOptionVersion ?? FEATURE_OPTION_VERSION,
+      maxSelectableFeatures: item.maxSelectableFeatures ?? 3,
+      score: scoreCriterionQuality({
+        questionId: item.questionId,
+        animalName: item.animalName,
+        selectedFeatures: item.selectedFeatures,
+        primaryFeature: item.primaryFeature ?? item.selectedFeatures[0],
+        answer: item.answer,
+        confidence: item.confidence,
+      }),
+    })),
+  ],
+  [evidenceResponses, transferResponses]
+)
 
   function toggleDiagnosticFeature(feature: string) {
     if (diagnosticFeatures.includes(feature)) {
@@ -2056,18 +2837,28 @@ const stage5ReviewPhyla = useMemo(() => {
   }
 
   function resetEvidenceForm() {
-    setEvidenceAnswer('')
-    setEvidenceSelectedFeatures([])
-    setEvidenceReasonText('')
-    setEvidenceConfidence(2)
-  }
+  setEvidenceAnswer('')
+  setEvidenceSelectedFeatures([])
+  setEvidencePrimaryFeature('')
+  setEvidenceSecondaryFeatures([])
+  setEvidenceReasonText('')
+  setEvidenceExclusionReasonText('')
+  setEvidenceConfidence(3)
+  setEvidenceFamiliarity(null)
+  setEvidenceLearnedBefore('unsure')
+}
 
   function resetTransferForm() {
-    setTransferAnswer('')
-    setTransferSelectedFeatures([])
-    setTransferReasonText('')
-    setTransferConfidence(2)
-  }
+  setTransferAnswer('')
+  setTransferSelectedFeatures([])
+  setTransferPrimaryFeature('')
+  setTransferSecondaryFeatures([])
+  setTransferReasonText('')
+  setTransferExclusionReasonText('')
+  setTransferConfidence(3)
+  setTransferFamiliarity(null)
+  setTransferLearnedBefore('unsure')
+}
 
   function openEvidenceQuestion(index: number, sourceResponses = evidenceResponses) {
     const question = stage3EvidenceQuestions[index]
@@ -2079,10 +2870,25 @@ const stage5ReviewPhyla = useMemo(() => {
     setEvidenceIndex(index)
 
     if (saved) {
+  const savedFeatures = sanitizeSelectedFeatures(
+    saved.selectedFeatures,
+    question as QuestionLike,
+    3
+  )
+  const savedPrimary = saved.primaryFeature ?? savedFeatures[0] ?? ''
+  const savedSecondary =
+    saved.secondaryFeatures ??
+    savedFeatures.filter((feature) => feature !== savedPrimary).slice(0, 2)
+
   setEvidenceAnswer(saved.answer)
-  setEvidenceSelectedFeatures(sanitizeSelectedFeatures(saved.selectedFeatures, question as QuestionLike, 3))
+  setEvidenceSelectedFeatures(savedFeatures)
+  setEvidencePrimaryFeature(savedPrimary)
+  setEvidenceSecondaryFeatures(savedSecondary)
   setEvidenceReasonText(saved.reasonText)
-  setEvidenceConfidence(saved.confidence)
+  setEvidenceExclusionReasonText(saved.exclusionReasonText ?? '')
+  setEvidenceConfidence(saved.confidence ?? 3)
+  setEvidenceFamiliarity(saved.familiarity ?? null)
+  setEvidenceLearnedBefore(saved.learnedBefore ?? 'unsure')
 } else {
   resetEvidenceForm()
 }
@@ -2091,84 +2897,144 @@ const stage5ReviewPhyla = useMemo(() => {
   function saveCurrentEvidence(): EvidenceResponse[] | null {
   if (!currentEvidence) return null
 
-  const visibleSelectedFeatures = evidenceSelectedFeatures.filter((feature) =>
-    getQuestionFeatureOptions(currentEvidence as QuestionLike).includes(feature)
+  const visibleSelectedFeatures = buildSelectedFeatures(
+    evidencePrimaryFeature,
+    evidenceSecondaryFeatures,
+    getQuestionFeatureOptions(currentEvidence as QuestionLike),
+    2
   )
 
+  if (!evidencePrimaryFeature) {
+    window.alert('請先選擇 1 個最主要判準。')
+    return null
+  }
+
   if (visibleSelectedFeatures.length === 0) {
-    window.alert('請先至少勾選一個判斷特徵。')
+    window.alert('請先至少選擇一個判斷特徵。')
     return null
   }
 
   if (visibleSelectedFeatures.length > 3) {
-    window.alert('第 3 階段最多只能選 3 個主要判斷特徵。')
+    window.alert('主要判準 1 項，加上次要判準最多 2 項。')
     return null
   }
 
-    if (evidenceReasonText.trim().length < 8) {
-      window.alert('請至少寫 8 個字，簡短說明判斷理由。')
-      return null
-    }
-
-    if (!evidenceAnswer) {
-      window.alert('請再選擇一個門別。')
-      return null
-    }
-
-    const animalName = inferAnimalName(currentEvidence)
-    const rule = ANIMAL_RULES[animalName]
-
-    const nextResponse: EvidenceResponse = {
-  questionId: currentEvidence.id,
-  animalName,
-  answer: evidenceAnswer,
-  selectedFeatures: visibleSelectedFeatures,
-  featureOptionsShown: currentEvidenceFeatureOptions,
-  maxSelectableFeatures: 3,
-  featureOptionVersion: FEATURE_OPTION_VERSION,
-  reasonText: evidenceReasonText,
-  confidence: evidenceConfidence,
-}
-
-    const nextResponses = upsertResponses(
-      evidenceResponses,
-      nextResponse,
-      stage3EvidenceQuestions as { id: string }[]
-    )
-    setEvidenceResponses(nextResponses)
-
-    const submittedAt = new Date().toISOString()
-    const durationMs =
-      evidenceQuestionStartedAtRef.current !== null
-        ? Math.max(0, Date.now() - evidenceQuestionStartedAtRef.current)
-        : null
-
-    const nextItemLog: LearningItemLog = {
-  stage: 'evidence',
-  questionId: currentEvidence.id,
-  animalName,
-  enteredAt: evidenceQuestionEnteredAtRef.current,
-  submittedAt,
-  durationMs,
-  finalAnswer: evidenceAnswer,
-  selectedFeatures: visibleSelectedFeatures,
-  featureOptionsShown: currentEvidenceFeatureOptions,
-  maxSelectableFeatures: 3,
-  featureOptionVersion: FEATURE_OPTION_VERSION,
-  reasonText: evidenceReasonText,
-  confidence: evidenceConfidence,
-  isCorrect: rule ? evidenceAnswer === rule.phylum : null,
-}
-
-    const nextItemLogs = upsertItemLogs(
-      evidenceItemLogs,
-      nextItemLog,
-      stage3EvidenceQuestions as { id: string }[]
-    )
-    setEvidenceItemLogs(nextItemLogs)
-
-    return nextResponses
+  if (evidenceReasonText.trim().length < 8) {
+    window.alert('請至少寫 8 個字，簡短說明判斷理由。')
+    return null
   }
+
+  if (evidenceExclusionReasonText.trim().length < 6) {
+    window.alert('請至少寫 6 個字，簡短說明你為什麼沒有選其他看起來相似的門別。')
+    return null
+  }
+
+  if (evidenceFamiliarity === null) {
+    window.alert('請選擇你以前是否看過這種動物。')
+    return null
+  }
+
+  if (!evidenceAnswer) {
+    window.alert('請再選擇一個門別。')
+    return null
+  }
+
+  const animalName = inferAnimalName(currentEvidence)
+  const rule = ANIMAL_RULES[animalName]
+
+  const primaryFeature = visibleSelectedFeatures[0]
+  const secondaryFeatures = visibleSelectedFeatures.slice(1)
+
+  const criterionScore = scoreCriterionQuality({
+    questionId: currentEvidence.id,
+    animalName,
+    selectedFeatures: visibleSelectedFeatures,
+    primaryFeature,
+    answer: evidenceAnswer,
+    confidence: evidenceConfidence,
+  })
+
+  const nextResponse: EvidenceResponse = {
+    questionId: currentEvidence.id,
+    animalName,
+    answer: evidenceAnswer,
+    selectedFeatures: visibleSelectedFeatures,
+    primaryFeature,
+    secondaryFeatures,
+    featureOptionsShown: currentEvidenceFeatureOptions,
+    featureOptionOrder: currentEvidenceFeatureOptions,
+    randomSeed: currentEvidenceRandomSeed,
+    maxSelectableFeatures: 3,
+    featureOptionVersion: FEATURE_OPTION_VERSION,
+    reasonText: evidenceReasonText,
+    exclusionReasonText: evidenceExclusionReasonText,
+    confidence: evidenceConfidence,
+    familiarity: evidenceFamiliarity,
+    learnedBefore: evidenceLearnedBefore,
+    criterionQuality: criterionScore.criterionQuality,
+    diagnosticHitCount: criterionScore.majorHitCount,
+    acceptableHitCount: criterionScore.acceptableHitCount,
+    auxiliaryCount: criterionScore.auxiliaryCount,
+    misleadingCount: criterionScore.misleadingCount,
+    highConfidenceError: criterionScore.highConfidenceError,
+    scoringRubricVersion: criterionScore.rubricVersion,
+  }
+
+  const nextResponses = upsertResponses(
+    evidenceResponses,
+    nextResponse,
+    stage3EvidenceQuestions as { id: string }[]
+  )
+
+  setEvidenceSelectedFeatures(visibleSelectedFeatures)
+  setEvidenceResponses(nextResponses)
+
+  const submittedAt = new Date().toISOString()
+  const durationMs =
+    evidenceQuestionStartedAtRef.current !== null
+      ? Math.max(0, Date.now() - evidenceQuestionStartedAtRef.current)
+      : null
+
+  const nextItemLog: LearningItemLog = {
+    stage: 'evidence',
+    questionId: currentEvidence.id,
+    animalName,
+    enteredAt: evidenceQuestionEnteredAtRef.current,
+    submittedAt,
+    durationMs,
+    finalAnswer: evidenceAnswer,
+    selectedFeatures: visibleSelectedFeatures,
+    primaryFeature,
+    secondaryFeatures,
+    featureOptionsShown: currentEvidenceFeatureOptions,
+    featureOptionOrder: currentEvidenceFeatureOptions,
+    randomSeed: currentEvidenceRandomSeed,
+    maxSelectableFeatures: 3,
+    featureOptionVersion: FEATURE_OPTION_VERSION,
+    reasonText: evidenceReasonText,
+    exclusionReasonText: evidenceExclusionReasonText,
+    confidence: evidenceConfidence,
+    familiarity: evidenceFamiliarity,
+    learnedBefore: evidenceLearnedBefore,
+    isCorrect: rule ? evidenceAnswer === rule.phylum : criterionScore.isCorrect,
+    criterionQuality: criterionScore.criterionQuality,
+    diagnosticHitCount: criterionScore.majorHitCount,
+    acceptableHitCount: criterionScore.acceptableHitCount,
+    auxiliaryCount: criterionScore.auxiliaryCount,
+    misleadingCount: criterionScore.misleadingCount,
+    highConfidenceError: criterionScore.highConfidenceError,
+    scoringRubricVersion: criterionScore.rubricVersion,
+  }
+
+  const nextItemLogs = upsertItemLogs(
+    evidenceItemLogs,
+    nextItemLog,
+    stage3EvidenceQuestions as { id: string }[]
+  )
+  setEvidenceItemLogs(nextItemLogs)
+
+  return nextResponses
+}
 
   function openTransferQuestion(index: number, sourceResponses = transferResponses) {
   const question = transferQuestions[index]
@@ -2180,36 +3046,63 @@ const stage5ReviewPhyla = useMemo(() => {
   setTransferIndex(index)
 
   if (saved) {
-    setTransferAnswer(saved.answer)
-    setTransferSelectedFeatures(
-      sanitizeSelectedFeatures(saved.selectedFeatures, question, 2)
-    )
-    setTransferReasonText(saved.reasonText)
-    setTransferConfidence(saved.confidence)
-  } else {
-    resetTransferForm()
-  }
+  const savedFeatures = sanitizeSelectedFeatures(saved.selectedFeatures, question, 3)
+  const savedPrimary = saved.primaryFeature ?? savedFeatures[0] ?? ''
+  const savedSecondary =
+    saved.secondaryFeatures ??
+    savedFeatures.filter((feature) => feature !== savedPrimary).slice(0, 2)
+
+  setTransferAnswer(saved.answer)
+  setTransferSelectedFeatures(savedFeatures)
+  setTransferPrimaryFeature(savedPrimary)
+  setTransferSecondaryFeatures(savedSecondary)
+  setTransferReasonText(saved.reasonText)
+  setTransferExclusionReasonText(saved.exclusionReasonText ?? '')
+  setTransferConfidence(saved.confidence ?? 3)
+  setTransferFamiliarity(saved.familiarity ?? null)
+  setTransferLearnedBefore(saved.learnedBefore ?? 'unsure')
+} else {
+  resetTransferForm()
+}
 }
 
 function saveCurrentTransfer(): EvidenceResponse[] | null {
   if (!currentTransfer) return null
 
-  const visibleSelectedFeatures = transferSelectedFeatures.filter((feature) =>
-    getQuestionFeatureOptions(currentTransfer).includes(feature)
+  const visibleSelectedFeatures = buildSelectedFeatures(
+    transferPrimaryFeature,
+    transferSecondaryFeatures,
+    getQuestionFeatureOptions(currentTransfer),
+    2
   )
 
-  if (visibleSelectedFeatures.length === 0) {
-    window.alert('請先至少勾選一個判斷特徵。')
+  if (!transferPrimaryFeature) {
+    window.alert('請先選擇 1 個最主要判準。')
     return null
   }
 
-  if (visibleSelectedFeatures.length > 2) {
-    window.alert('第 4 階段最多只能選 2 個主要判斷特徵。')
+  if (visibleSelectedFeatures.length === 0) {
+    window.alert('請先至少選擇一個判斷特徵。')
+    return null
+  }
+
+  if (visibleSelectedFeatures.length > 3) {
+    window.alert('主要判準 1 項，加上次要判準最多 2 項。')
     return null
   }
 
   if (transferReasonText.trim().length < 8) {
     window.alert('請至少寫 8 個字，簡短說明判斷理由。')
+    return null
+  }
+
+  if (transferExclusionReasonText.trim().length < 6) {
+    window.alert('請至少寫 6 個字，簡短說明你為什麼沒有選其他看起來相似的門別。')
+    return null
+  }
+
+  if (transferFamiliarity === null) {
+    window.alert('請選擇你以前是否看過這種動物。')
     return null
   }
 
@@ -2221,19 +3114,46 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
   const animalName = inferAnimalName(currentTransfer)
   const rule = ANIMAL_RULES[animalName]
 
+  const primaryFeature = visibleSelectedFeatures[0]
+  const secondaryFeatures = visibleSelectedFeatures.slice(1)
+
+  const criterionScore = scoreCriterionQuality({
+    questionId: currentTransfer.id,
+    animalName,
+    selectedFeatures: visibleSelectedFeatures,
+    primaryFeature,
+    answer: transferAnswer,
+    confidence: transferConfidence,
+  })
+
   const nextResponse: EvidenceResponse = {
-  questionId: currentTransfer.id,
-  animalName,
-  answer: transferAnswer,
-  selectedFeatures: visibleSelectedFeatures,
-  featureOptionsShown: currentTransferFeatureOptions,
-  maxSelectableFeatures: 2,
-  featureOptionVersion: FEATURE_OPTION_VERSION,
-  reasonText: transferReasonText,
-  confidence: transferConfidence,
-}
+    questionId: currentTransfer.id,
+    animalName,
+    answer: transferAnswer,
+    selectedFeatures: visibleSelectedFeatures,
+    primaryFeature,
+    secondaryFeatures,
+    featureOptionsShown: currentTransferFeatureOptions,
+    featureOptionOrder: currentTransferFeatureOptions,
+    randomSeed: currentTransferRandomSeed,
+    maxSelectableFeatures: 3,
+    featureOptionVersion: FEATURE_OPTION_VERSION,
+    reasonText: transferReasonText,
+    exclusionReasonText: transferExclusionReasonText,
+    confidence: transferConfidence,
+    familiarity: transferFamiliarity,
+    learnedBefore: transferLearnedBefore,
+    criterionQuality: criterionScore.criterionQuality,
+    diagnosticHitCount: criterionScore.majorHitCount,
+    acceptableHitCount: criterionScore.acceptableHitCount,
+    auxiliaryCount: criterionScore.auxiliaryCount,
+    misleadingCount: criterionScore.misleadingCount,
+    highConfidenceError: criterionScore.highConfidenceError,
+    scoringRubricVersion: criterionScore.rubricVersion,
+  }
 
   const nextResponses = upsertResponses(transferResponses, nextResponse, transferQuestions)
+
   setTransferResponses(nextResponses)
   setTransferSelectedFeatures(visibleSelectedFeatures)
 
@@ -2244,21 +3164,35 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
       : null
 
   const nextItemLog: LearningItemLog = {
-  stage: 'transfer',
-  questionId: currentTransfer.id,
-  animalName,
-  enteredAt: transferQuestionEnteredAtRef.current,
-  submittedAt,
-  durationMs,
-  finalAnswer: transferAnswer,
-  selectedFeatures: visibleSelectedFeatures,
-  featureOptionsShown: currentTransferFeatureOptions,
-  maxSelectableFeatures: 2,
-  featureOptionVersion: FEATURE_OPTION_VERSION,
-  reasonText: transferReasonText,
-  confidence: transferConfidence,
-  isCorrect: rule ? transferAnswer === rule.phylum : null,
-}
+    stage: 'transfer',
+    questionId: currentTransfer.id,
+    animalName,
+    enteredAt: transferQuestionEnteredAtRef.current,
+    submittedAt,
+    durationMs,
+    finalAnswer: transferAnswer,
+    selectedFeatures: visibleSelectedFeatures,
+    primaryFeature,
+    secondaryFeatures,
+    featureOptionsShown: currentTransferFeatureOptions,
+    featureOptionOrder: currentTransferFeatureOptions,
+    randomSeed: currentTransferRandomSeed,
+    maxSelectableFeatures: 3,
+    featureOptionVersion: FEATURE_OPTION_VERSION,
+    reasonText: transferReasonText,
+    exclusionReasonText: transferExclusionReasonText,
+    confidence: transferConfidence,
+    familiarity: transferFamiliarity,
+    learnedBefore: transferLearnedBefore,
+    isCorrect: rule ? transferAnswer === rule.phylum : criterionScore.isCorrect,
+    criterionQuality: criterionScore.criterionQuality,
+    diagnosticHitCount: criterionScore.majorHitCount,
+    acceptableHitCount: criterionScore.acceptableHitCount,
+    auxiliaryCount: criterionScore.auxiliaryCount,
+    misleadingCount: criterionScore.misleadingCount,
+    highConfidenceError: criterionScore.highConfidenceError,
+    scoringRubricVersion: criterionScore.rubricVersion,
+  }
 
   const nextItemLogs = upsertItemLogs(
     transferItemLogs,
@@ -2301,14 +3235,49 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
     return stage3EvidenceQuestions.map((question) => {
       const animalName = inferAnimalName(question as QuestionLike)
       const rule = ANIMAL_RULES[animalName]
+      const selectedFeatures = rule?.keyFeatures?.slice(0, 2) ?? ['刺絲胞', '觸手']
+      const primaryFeature = selectedFeatures[0]
+      const secondaryFeatures = selectedFeatures.slice(1)
+      const answer = rule?.phylum ?? '刺絲胞動物門'
+      const randomSeed = `demo::${question.id}::evidence::${FEATURE_OPTION_VERSION}`
+      const featureOptions = seededShuffleArray(
+        getQuestionFeatureOptions(question as QuestionLike),
+        randomSeed
+      )
+
+      const criterionScore = scoreCriterionQuality({
+        questionId: question.id,
+        animalName,
+        selectedFeatures,
+        primaryFeature,
+        answer,
+        confidence: 3,
+      })
 
       return {
         questionId: question.id,
         animalName,
-        answer: rule?.phylum ?? '刺絲胞動物門',
-        selectedFeatures: rule?.keyFeatures?.slice(0, 2) ?? ['刺絲胞', '觸手'],
-        reasonText: `我根據 ${rule?.keyFeatures?.slice(0, 2).join('、') ?? '特徵'} 進行判斷。`,
+        answer,
+        selectedFeatures,
+        primaryFeature,
+        secondaryFeatures,
+        featureOptionsShown: featureOptions,
+        featureOptionOrder: featureOptions,
+        randomSeed,
+        maxSelectableFeatures: 3,
+        featureOptionVersion: FEATURE_OPTION_VERSION,
+        reasonText: `我根據 ${selectedFeatures.join('、')} 進行判斷。`,
+        exclusionReasonText: '我排除其他門別，因為主要構造特徵不同。',
         confidence: 3,
+        familiarity: 3,
+        learnedBefore: 'unsure',
+        criterionQuality: criterionScore.criterionQuality,
+        diagnosticHitCount: criterionScore.majorHitCount,
+        acceptableHitCount: criterionScore.acceptableHitCount,
+        auxiliaryCount: criterionScore.auxiliaryCount,
+        misleadingCount: criterionScore.misleadingCount,
+        highConfidenceError: criterionScore.highConfidenceError,
+        scoringRubricVersion: criterionScore.rubricVersion,
       }
     })
   }
@@ -2317,18 +3286,50 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
     return transferQuestions.map((question) => {
       const animalName = inferAnimalName(question)
       const rule = ANIMAL_RULES[animalName]
+      const selectedFeatures = rule?.keyFeatures?.slice(0, 2) ?? ['刺絲胞', '觸手']
+      const primaryFeature = selectedFeatures[0]
+      const secondaryFeatures = selectedFeatures.slice(1)
+      const answer = rule?.phylum ?? '刺絲胞動物門'
+      const randomSeed = `demo::${question.id}::transfer::${FEATURE_OPTION_VERSION}`
+      const featureOptions = seededShuffleArray(
+        getQuestionFeatureOptions(question),
+        randomSeed
+      )
+
+      const criterionScore = scoreCriterionQuality({
+        questionId: question.id,
+        animalName,
+        selectedFeatures,
+        primaryFeature,
+        answer,
+        confidence: 3,
+      })
 
       return {
-  questionId: question.id,
-  animalName,
-  answer: rule?.phylum ?? '刺絲胞動物門',
-  selectedFeatures: rule?.keyFeatures?.slice(0, 2) ?? ['刺絲胞', '觸手'],
-  featureOptionsShown: getQuestionFeatureOptions(question),
-  maxSelectableFeatures: 2,
-  featureOptionVersion: FEATURE_OPTION_VERSION,
-  reasonText: `我根據 ${rule?.keyFeatures?.slice(0, 2).join('、') ?? '特徵'} 進行判斷。`,
-  confidence: 3,
-}
+        questionId: question.id,
+        animalName,
+        answer,
+        selectedFeatures,
+        primaryFeature,
+        secondaryFeatures,
+        featureOptionsShown: featureOptions,
+        featureOptionOrder: featureOptions,
+        randomSeed,
+        maxSelectableFeatures: 3,
+        featureOptionVersion: FEATURE_OPTION_VERSION,
+        reasonText: `我根據 ${selectedFeatures.join('、')} 進行判斷。`,
+        exclusionReasonText: '我排除其他門別，因為主要構造特徵不同。',
+        confidence: 3,
+        familiarity: 3,
+        learnedBefore: 'unsure',
+        criterionQuality: criterionScore.criterionQuality,
+        diagnosticHitCount: criterionScore.majorHitCount,
+        acceptableHitCount: criterionScore.acceptableHitCount,
+        auxiliaryCount: criterionScore.auxiliaryCount,
+        misleadingCount: criterionScore.misleadingCount,
+        highConfidenceError: criterionScore.highConfidenceError,
+        scoringRubricVersion: criterionScore.rubricVersion,
+      }
     })
   }
 
@@ -2360,7 +3361,7 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
     setEvidenceIndex(0)
     setTransferIndex(0)
 
-    setStage('awareness')
+    setStage('reflection')
   }
 
   function seedStage3Dev() {
@@ -2489,6 +3490,53 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
     setStage('done')
   }
 
+  function seedStage3GuideDev() {
+    const demoGroups = buildDemoStage1Groups()
+
+    setGroups(demoGroups)
+    setBankCardIds([])
+    setOverallReason('我先根據外觀與身體構造做初步分類，再觀察有哪些共同特徵。')
+    setGroupCreateCount(3)
+    setCardMoveCount(stage1Cards.length)
+
+    setBridgeReflectAnswers(
+      Object.fromEntries(
+        bridgeReflectQuestions.map((question) => [question.id, question.options.slice(0, 1)])
+      )
+    )
+    setDiagnosticFeatures(['刺絲胞', '身體分節', '外骨骼'])
+    setPossibleFeatures(['會飛', '星形'])
+    setCustomFeatureText('')
+    setReadinessAnswers({})
+    setReadinessAttemptCounts({})
+    setAwarenessCommitment(false)
+    setAwarenessSecondsSpent(0)
+
+    setEvidenceResponses([])
+    setTransferResponses([])
+    setEvidenceItemLogs([])
+    setTransferItemLogs([])
+
+    setEvidenceIndex(0)
+    resetEvidenceForm()
+    setTransferIndex(0)
+    resetTransferForm()
+
+    setStage('guide')
+  }
+
+  function seedStage4EvidenceDev() {
+    seedStage3Dev()
+  }
+
+  function seedStage5TransferDev() {
+    seedStage4Dev()
+  }
+
+  function seedStage6DoneDev() {
+    seedStage5Dev()
+  }
+
   function clearDevProgress() {
     if (participantCode) {
       localStorage.removeItem(`animal-classifier-progress:${participantCode}`)
@@ -2525,12 +3573,80 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
     () => ({
       participantCode,
       participant: enterSession,
-      version: 'v10-feature-options-3max-2max',
-featureOptionVersion: FEATURE_OPTION_VERSION,
+      version: APP_VERSION,
+      appVersion: APP_VERSION,
+      itemBankVersion: enterSession?.itemBankVersion ?? ITEM_BANK_VERSION,
+      rubricVersion: enterSession?.rubricVersion ?? RUBRIC_VERSION,
+      featureOptionVersion: FEATURE_OPTION_VERSION,
+      platformMode: enterSession?.platformMode ?? 'dev_test',
+      dataUseScope: enterSession?.dataUseScope ?? 'excluded_test',
+      taskVariant: enterSession?.taskVariant ?? 'unknown',
+      researchMode: enterSession?.researchMode ?? null,
+      learningExperience:
+        enterSession?.learningExperience ?? null,
+      learningExperienceLabel:
+        enterSession?.learningExperienceLabel ??
+        enterSession?.animalClassificationExperience ??
+        null,
+      animalClassificationExperience:
+        enterSession?.animalClassificationExperience ?? null,
+      researchEntryVersion:
+        enterSession?.researchEntryVersion ??
+        enterSession?.appVersion ??
+        null,
+      consentVersion: enterSession?.consentVersion ?? null,
+      assentAccepted: enterSession?.assentAccepted ?? false,
+      formalResearchMode,
+      currentResearchStage: stage,
+      dataQualityFlags: researchDataQualityFlags,
 featureOptionPolicy: {
   evidenceMaxSelectableFeatures: 3,
-  transferMaxSelectableFeatures: 2,
+  transferMaxSelectableFeatures: 3,
+  randomizationPolicy: 'seeded_shuffle_by_participant_item_stage_and_feature_option_version',
   questionFeatureOptions: ANIMAL_FEATURE_OPTIONS,
+},
+readinessGatePolicy: {
+  formalResearchMode: 'neutral_feedback_all_answered_gate',
+  teachingDemoMode: 'immediate_corrective_feedback_allowed',
+  readinessUsedAsMainOutcome: false,
+},
+researchStageMapping: {
+  stage1: {
+    appStage: 'stage1',
+    researchStage: 1,
+    label: '先備概念外顯／自由分類',
+    purpose: '外顯學生原有分類架構與日常判準',
+  },
+  reflection: {
+    appStage: 'reflection',
+    researchStage: 2,
+    label: '線索反思與判準區分',
+    purpose: '外顯原始判準，區分低診斷性表面線索與高診斷性結構判準',
+  },
+  guide: {
+    appStage: 'guide',
+    researchStage: 3,
+    label: '標準判準學習／六門提示卡與就緒檢核',
+    purpose: '提供標準判準語彙與低風險檢核',
+  },
+  evidence: {
+    appStage: 'evidence',
+    researchStage: 4,
+    label: '帶提示判定',
+    purpose: '蒐集鷹架支持下的分類判準應用表現',
+  },
+  transfer: {
+    appStage: 'transfer',
+    researchStage: 5,
+    label: '遷移應用',
+    purpose: '蒐集撤除完整提示後的遷移表現',
+  },
+  done: {
+    appStage: 'done',
+    researchStage: 6,
+    label: '診斷回饋',
+    purpose: '完成正式作答資料鎖定後提供形成性回饋',
+  },
 },
       stage1: {
         groups,
@@ -2553,6 +3669,7 @@ featureOptionPolicy: {
       },
       evidenceResponses,
       transferResponses,
+      scoredResponses,
       evidenceItemLogs,
       transferItemLogs,
       eventLogs,
@@ -2569,6 +3686,7 @@ featureOptionPolicy: {
     [
   participantCode,
   enterSession,
+  formalResearchMode,
   groups,
   bankCardIds,
   overallReason,
@@ -2582,10 +3700,12 @@ featureOptionPolicy: {
   readinessAttemptCounts,
   readinessRetryCount,
   readinessFirstPassCount,
+  readinessCorrectCount,
   awarenessCommitment,
   awarenessSecondsSpent,
   evidenceResponses,
   transferResponses,
+  scoredResponses,
   evidenceItemLogs,
   transferItemLogs,
   eventLogs,
@@ -2726,6 +3846,10 @@ featureOptionPolicy: {
                   ? `${enterSession.maskedName ?? '未顯示姓名'}｜${enterSession.grade} 年級 ${enterSession.className} 班 ${enterSession.seatNo} 號`
                   : '尚未讀到進入資訊'}
               </div>
+              <div className="mt-1 text-xs leading-5 text-gray-500">
+                活動模式：{researchModeLabel}
+                {formalResearchMode ? '｜正式名單匯入資料，將納入研究主要資料候選集' : '｜不納入正式研究主要分析'}
+              </div>
             </div>
           </div>
         </div>
@@ -2749,7 +3873,7 @@ featureOptionPolicy: {
 
               <button
                 type="button"
-                onClick={seedStage3Dev}
+                onClick={seedStage3GuideDev}
                 className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900"
               >
                 跳到第 3 階段
@@ -2757,7 +3881,7 @@ featureOptionPolicy: {
 
               <button
                 type="button"
-                onClick={seedStage4Dev}
+                onClick={seedStage4EvidenceDev}
                 className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900"
               >
                 跳到第 4 階段
@@ -2765,10 +3889,18 @@ featureOptionPolicy: {
 
               <button
                 type="button"
-                onClick={seedStage5Dev}
+                onClick={seedStage5TransferDev}
                 className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900"
               >
                 跳到第 5 階段
+              </button>
+
+              <button
+                type="button"
+                onClick={seedStage6DoneDev}
+                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900"
+              >
+                跳到第 6 階段
               </button>
 
               <button
@@ -3116,7 +4248,7 @@ featureOptionPolicy: {
 
                   {!stage1Complete ? (
                     <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900">
-                      <div className="font-semibold">目前尚不能進入階段 2，原因如下：</div>
+                      <div className="font-semibold">目前尚不能進入第 2 階段，原因如下：</div>
                       <ul className="mt-1 list-disc pl-5">
                         {stage1IncompleteMessages.map((message) => (
                           <li key={message}>{message}</li>
@@ -3125,7 +4257,7 @@ featureOptionPolicy: {
                     </div>
                   ) : (
                     <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm leading-6 text-green-800">
-                      已符合進入階段 2 的條件。
+                      已符合進入第 2 階段 的條件。
                     </div>
                   )}
 
@@ -3133,10 +4265,10 @@ featureOptionPolicy: {
                     <button
                       type="button"
                       disabled={!stage1Complete}
-                      onClick={() => setStage('awareness')}
+                      onClick={() => setStage('reflection')}
                       className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
                     >
-                      進入階段 2
+                      進入第 2 階段
                     </button>
                   </div>
                 </div>
@@ -3144,9 +4276,9 @@ featureOptionPolicy: {
             </section>
           )}
 
-          {stage === 'awareness' && (
+          {stage === 'reflection' && (
             <section className="space-y-4">
-              <SummaryBlock title="上一階段摘要">
+              <SummaryBlock title="第 1 階段摘要">
                 <div className="space-y-2">
                   {stage1SummaryLines.map((line) => (
                     <div key={line}>{line}</div>
@@ -3158,10 +4290,9 @@ featureOptionPolicy: {
               </SummaryBlock>
 
               <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 2 階段：判準建立</h2>
+                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 2 階段：線索反思與判準區分</h2>
                 <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
-                  這一階段先建立規則，再進到正式判斷。系統會記錄學習時間，
-                  選項順序隨機化，且可重作並記錄重試次數。
+                  這一階段要把你在自由分類時使用的線索外顯化，並初步區分哪些線索較可能具有分門判斷力，哪些只是輔助或容易誤用的線索。
                 </div>
               </div>
 
@@ -3249,112 +4380,141 @@ featureOptionPolicy: {
                 </div>
               </div>
 
-              {awarenessABComplete ? (
-                <>
-                  <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                    <h3 className="mb-4 text-2xl font-black">任務 C：六門提示卡</h3>
-                    <div className="mb-4 text-sm leading-6 text-gray-700">
-                      你已完成前面的回顧與線索分類，現在可以參考六個門的關鍵特徵與代表生物。第三階段可繼續參考，不要求死背。
-                    </div>
-
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      {PHYLUM_GUIDE.map((guide) => (
-                        <GuideCardView key={guide.phylum} guide={guide} />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                    <h3 className="mb-4 text-2xl font-black">任務 D：就緒檢核</h3>
-                    <div className="mb-4 text-sm text-gray-600">
-                      選項順序已隨機化。若答錯，請回看提示卡再重作。系統會記錄重試次數，但不直接顯示正確答案位置。
-                    </div>
-
-                    <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700">
-                       目前學習時間：{awarenessSecondsSpent} 秒
-                    </div>
-
-                    <div className="space-y-4">
-                      {READINESS_CHECKS.map((item) => {
-                        const currentValue = readinessAnswers[item.id] ?? ''
-                        const isCorrect = currentValue && currentValue === item.correct
-                        const isWrong = currentValue && currentValue !== item.correct
-
-                        return (
-                          <div key={item.id} className="rounded-xl border border-gray-200 p-4">
-                            <div className="mb-3 font-bold">{item.question}</div>
-
-                            <div className="grid gap-2 md:grid-cols-3">
-                              {(readinessOptionMap[item.id] ?? item.options).map((option) => (
-                                <label
-                                  key={option}
-                                  className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm"
-                                >
-                                  <input
-                                    type="radio"
-                                    name={item.id}
-                                    checked={currentValue === option}
-                                    onChange={() => handleReadinessAnswer(item.id, option)}
-                                    className="mt-1"
-                                  />
-                                  <span>{option}</span>
-                                </label>
-                              ))}
-                            </div>
-
-                            {isCorrect ? (
-                              <div className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-                                正確。
-                              </div>
-                            ) : null}
-
-                            {isWrong ? (
-                              <div className="mt-3 rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
-                                這題還需要修正。先回看上面的提示卡，再重選一次。
-                              </div>
-                            ) : null}
-
-                            <div className="mt-2 text-xs text-gray-500">
-                              本題已作答 {readinessAttemptCounts[item.id] ?? 0} 次
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    <label className="mt-5 flex items-start gap-2 rounded-xl border border-gray-200 p-3 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={awarenessCommitment}
-                        onChange={(e) => setAwarenessCommitment(e.target.checked)}
-                        className="mt-1"
-                      />
-                      <span>
-                        我知道第三階段可以參考提示卡，不需要硬背六個門；重點是學會用特徵判斷。
-                      </span>
-                    </label>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
-                  <h3 className="mb-2 text-xl font-black text-amber-900">任務 C、D 將在完成任務 A、B 後開啟</h3>
-                  <div className="text-sm leading-6 text-amber-900">
-                    請先完成前兩項任務，以免後面的提示與檢核干擾你的作答。
-                  </div>
-                  <ul className="mt-3 list-disc pl-5 text-sm leading-6 text-amber-900">
-                    <li>{reflectionComplete ? '任務 A 已完成' : '任務 A 尚未完成'}</li>
-                    <li>{featureChoiceComplete ? '任務 B 已完成' : '任務 B 尚未完成'}</li>
-                  </ul>
-                </div>
-              )}
-
               <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
                 <button
                   type="button"
                   onClick={() => setStage('stage1')}
                   className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
                 >
-                  回到階段 1
+                  回到第 1 階段
+                </button>
+                <button
+                  type="button"
+                  disabled={!awarenessABComplete}
+                  onClick={() => setStage('guide')}
+                  className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
+                >
+                  進入第 3 階段
+                </button>
+              </div>
+            </section>
+          )}
+
+          {stage === 'guide' && (
+            <section className="space-y-4">
+              <SummaryBlock title="前兩階段摘要">
+                <div className="space-y-2">
+                  <div>已形成 {nonEmptyGroups.length} 個非空群組。</div>
+                  <div>較適合幫助分門：{diagnosticCount} 項。</div>
+                  <div>可能有幫助但不穩定：{possibleCount} 項。</div>
+                  {customFeatureText.trim() ? <div>自訂補充特徵：{customFeatureText}</div> : null}
+                </div>
+              </SummaryBlock>
+
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 3 階段：標準判準學習與就緒檢核</h2>
+                <div className="rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+                  這一階段提供六個動物門的提示卡與低風險檢核。你可以先學習標準判準，再進入第 4 階段的帶提示判定。
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                <h3 className="mb-4 text-2xl font-black">任務 C：六門提示卡</h3>
+                <div className="mb-4 text-sm leading-6 text-gray-700">
+                  你已完成前面的回顧與線索分類，現在可以參考六個門的關鍵特徵與代表生物。第 4 階段可繼續參考，不要求死背。
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {PHYLUM_GUIDE.map((guide) => (
+                    <GuideCardView key={guide.phylum} guide={guide} />
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                <h3 className="mb-4 text-2xl font-black">任務 D：就緒檢核</h3>
+                <div className="mb-4 text-sm text-gray-600">
+                  這是進入第 4 階段前的自我檢核。正式參與模式不顯示每題正誤，也不要求全部答對；請依提示卡判斷，每題選一項後即可繼續。系統會記錄作答與調整次數。
+                </div>
+
+                <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-700">
+                  目前學習時間：{awarenessSecondsSpent} 秒
+                </div>
+
+                <div className="space-y-4">
+                  {READINESS_CHECKS.map((item) => {
+                    const currentValue = readinessAnswers[item.id] ?? ''
+                    const isCorrect = currentValue && currentValue === item.correct
+                    const isWrong = currentValue && currentValue !== item.correct
+
+                    return (
+                      <div key={item.id} className="rounded-xl border border-gray-200 p-4">
+                        <div className="mb-3 font-bold">{item.question}</div>
+
+                        <div className="grid gap-2 md:grid-cols-3">
+                          {(readinessOptionMap[item.id] ?? item.options).map((option) => (
+                            <label
+                              key={option}
+                              className="flex items-start gap-2 rounded-lg border border-gray-200 p-2 text-sm"
+                            >
+                              <input
+                                type="radio"
+                                name={item.id}
+                                checked={currentValue === option}
+                                onChange={() => handleReadinessAnswer(item.id, option)}
+                                className="mt-1"
+                              />
+                              <span>{option}</span>
+                            </label>
+                          ))}
+                        </div>
+
+                        {formalResearchMode && currentValue ? (
+                          <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                            已記錄此題選擇。若不確定，請回看提示卡後再調整。
+                          </div>
+                        ) : null}
+
+                        {!formalResearchMode && isCorrect ? (
+                          <div className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                            正確。
+                          </div>
+                        ) : null}
+
+                        {!formalResearchMode && isWrong ? (
+                          <div className="mt-3 rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+                            這題還需要修正。先回看上面的提示卡，再重選一次。
+                          </div>
+                        ) : null}
+
+                        <div className="mt-2 text-xs text-gray-500">
+                          本題已作答 {readinessAttemptCounts[item.id] ?? 0} 次
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <label className="mt-5 flex items-start gap-2 rounded-xl border border-gray-200 p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={awarenessCommitment}
+                    onChange={(e) => setAwarenessCommitment(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <span>
+                    我知道第 4 階段可以參考提示卡，不需要硬背六個門；重點是學會用特徵判斷。
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
+                <button
+                  type="button"
+                  onClick={() => setStage('reflection')}
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
+                >
+                  回到第 2 階段
                 </button>
                 <button
                   type="button"
@@ -3365,7 +4525,7 @@ featureOptionPolicy: {
                   }}
                   className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
                 >
-                  進入階段 3
+                  進入第 4 階段
                 </button>
               </div>
             </section>
@@ -3376,7 +4536,7 @@ featureOptionPolicy: {
               <div className="space-y-4">
                 <div ref={evidenceTopRef} />
 
-                <SummaryBlock title="前面兩階段摘要">
+                <SummaryBlock title="前三階段摘要">
                   <div className="space-y-2">
                     <div>已形成 {nonEmptyGroups.length} 個非空群組。</div>
                     <div>較適合幫助分門：{diagnosticCount} 項。</div>
@@ -3386,7 +4546,7 @@ featureOptionPolicy: {
                 </SummaryBlock>
 
                 <QuestionCard
-  title={`第 3 階段：帶提示判定（${evidenceIndex + 1} / ${stage3EvidenceQuestions.length}）`}
+  title={`第 4 階段：帶提示判定（${evidenceIndex + 1} / ${stage3EvidenceQuestions.length}）`}
   prompt={currentEvidence.prompt}
   stimulusText={currentEvidence.stimulusText}
   imageUrl={currentEvidence.imageUrl}
@@ -3411,31 +4571,66 @@ featureOptionPolicy: {
 />
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                  <div className="mb-3 text-lg font-black">
-  先勾選你判斷時最主要依據的特徵
-</div>
-<div className="mb-2 text-sm text-gray-600">
-  請從本題提供的少量線索中，選出最能支持分類判斷的 1–3 項。
-</div>
-                  <FeatureCheckboxes
-  options={currentEvidenceFeatureOptions}
-  selected={evidenceSelectedFeatures}
-  onChange={setEvidenceSelectedFeatures}
-  maxSelected={3}
-/>
+                  <ResearchCriterionSelector
+                    options={currentEvidenceFeatureOptions}
+  primaryFeature={evidencePrimaryFeature}
+  secondaryFeatures={evidenceSecondaryFeatures}
+  onPrimaryChange={(feature) => {
+    const nextSecondary = evidenceSecondaryFeatures
+      .filter((item) => item !== feature)
+      .slice(0, 2)
+
+    setEvidencePrimaryFeature(feature)
+    setEvidenceSecondaryFeatures(nextSecondary)
+    setEvidenceSelectedFeatures(
+      buildSelectedFeatures(feature, nextSecondary, currentEvidenceFeatureOptions, 2)
+    )
+  }}
+  onSecondaryChange={(features) => {
+    const nextSecondary = features
+      .filter((item) => item !== evidencePrimaryFeature)
+      .slice(0, 2)
+
+    setEvidenceSecondaryFeatures(nextSecondary)
+    setEvidenceSelectedFeatures(
+      buildSelectedFeatures(evidencePrimaryFeature, nextSecondary, currentEvidenceFeatureOptions, 2)
+    )
+  }}
+  maxSecondary={2}
+/>  
 
                   <div className="mb-2 mt-5 text-lg font-black">再簡短說明理由</div>
                   <div className="mb-2 text-sm text-gray-600">
                     可用句型：「我觀察到＿＿特徵，所以我推測它可能屬於＿＿。」
                   </div>
                   <textarea
-                    value={evidenceReasonText}
-                    onChange={(e) => setEvidenceReasonText(e.target.value)}
-                    className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
-                    placeholder="請至少寫 8 個字，簡短說明你是根據哪些特徵做判斷"
-                  />
+  value={evidenceReasonText}
+  onChange={(e) => setEvidenceReasonText(e.target.value)}
+  className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
+  placeholder="請至少寫 8 個字，簡短說明你是根據哪些特徵做判斷"
+/>
 
-                  <div className="mb-3 mt-5 text-lg font-black">接著選擇你判定的門別</div>
+<div className="mb-2 mt-5 text-lg font-black">再說明你排除其他門別的理由</div>
+<div className="mb-2 text-sm text-gray-600">
+  可用句型：「我沒有選＿＿門，是因為這個動物沒有＿＿特徵。」
+</div>
+<textarea
+  value={evidenceExclusionReasonText}
+  onChange={(e) => setEvidenceExclusionReasonText(e.target.value)}
+  className="min-h-[90px] w-full rounded-xl border border-gray-300 px-3 py-2"
+  placeholder="請至少寫 6 個字，說明你為什麼沒有選其他看起來相似的門別"
+/>
+
+<div className="mt-5">
+  <FamiliarityAndLearningControls
+    familiarity={evidenceFamiliarity}
+    setFamiliarity={setEvidenceFamiliarity}
+    learnedBefore={evidenceLearnedBefore}
+    setLearnedBefore={setEvidenceLearnedBefore}
+  />
+</div>
+
+<div className="mb-3 mt-5 text-lg font-black">接著選擇你判定的門別</div>
                   <div className="grid gap-2 md:grid-cols-2">
                     {SIX_PHYLA.map((option) => (
                       <label
@@ -3457,12 +4652,19 @@ featureOptionPolicy: {
                   <input
                     type="range"
                     min={1}
-                    max={4}
+                    max={5}
                     value={evidenceConfidence}
                     onChange={(e) => setEvidenceConfidence(Number(e.target.value))}
                     className="w-full"
                   />
-                  <div className="mt-1 text-sm text-gray-600">目前信心：{evidenceConfidence} / 4</div>
+                  <div className="mt-1 text-sm text-gray-600">
+                    目前信心：{evidenceConfidence} / 5
+                    {evidenceConfidence === 1 ? '（完全不確定）' : ''}
+                    {evidenceConfidence === 2 ? '（有點猜測）' : ''}
+                    {evidenceConfidence === 3 ? '（大致確定）' : ''}
+                    {evidenceConfidence === 4 ? '（很確定）' : ''}
+                    {evidenceConfidence === 5 ? '（非常確定，且能說明理由）' : ''}
+                  </div> 
 
                   <div className="mt-5 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
                     目前已完成 {evidenceResponses.length} / {stage3EvidenceQuestions.length} 題。右側提示卡可隨時參考。
@@ -3472,10 +4674,10 @@ featureOptionPolicy: {
                     <div className="flex flex-col gap-3 sm:flex-row">
                       <button
                         type="button"
-                        onClick={() => setStage('awareness')}
+                        onClick={() => setStage('guide')}
                         className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
                       >
-                        回到階段 2
+                        回到第 3 階段
                       </button>
                       <button
                         type="button"
@@ -3529,19 +4731,23 @@ featureOptionPolicy: {
               <div className="space-y-4">
                 <div ref={transferTopRef} />
 
-                <SummaryBlock title="前面三階段摘要">
+                <SummaryBlock title="前四階段摘要">
                   <div className="space-y-2">
                     <div>已形成 {nonEmptyGroups.length} 個非空群組。</div>
                     <div>較適合幫助分門：{diagnosticCount} 項。</div>
                     <div>可能有幫助但不穩定：{possibleCount} 項。</div>
-                    <div>
-                      第 3 階段目前正確 {correctCount} / {stage3EvidenceQuestions.length} 題。
-                    </div>
+                    {formalResearchMode ? (
+                      <div>第 4 階段已完成。正式研究版在第 5 階段遷移題完成前不顯示正確題數。</div>
+                    ) : (
+                      <div>
+                        第 4 階段目前正確 {correctCount} / {stage3EvidenceQuestions.length} 題。
+                      </div>
+                    )}
                   </div>
                 </SummaryBlock>
 
                 <QuestionCard
-  title={`第 4 階段：遷移應用（${transferIndex + 1} / ${transferQuestions.length}）`}
+  title={`第 5 階段：遷移應用（${transferIndex + 1} / ${transferQuestions.length}）`}
   prompt={currentTransfer.prompt}
   stimulusText={currentTransfer.stimulusText}
   imageUrl={currentTransfer.imageUrl}
@@ -3567,17 +4773,32 @@ featureOptionPolicy: {
 />
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                  <div className="mb-3 text-lg font-black">
-  先勾選你判斷時最主要依據的特徵
-</div>
-<div className="mb-2 text-sm text-gray-600">
-  這一階段請回想前面學到的分類判準，從本題線索中選出最關鍵的 1–2 項。
-</div>
-                  <FeatureCheckboxes
+                  <ResearchCriterionSelector
   options={currentTransferFeatureOptions}
-  selected={transferSelectedFeatures}
-  onChange={setTransferSelectedFeatures}
-  maxSelected={2}
+  primaryFeature={transferPrimaryFeature}
+  secondaryFeatures={transferSecondaryFeatures}
+  onPrimaryChange={(feature) => {
+    const nextSecondary = transferSecondaryFeatures
+      .filter((item) => item !== feature)
+      .slice(0, 2)
+
+    setTransferPrimaryFeature(feature)
+    setTransferSecondaryFeatures(nextSecondary)
+    setTransferSelectedFeatures(
+      buildSelectedFeatures(feature, nextSecondary, currentTransferFeatureOptions, 2)
+    )
+  }}
+  onSecondaryChange={(features) => {
+    const nextSecondary = features
+      .filter((item) => item !== transferPrimaryFeature)
+      .slice(0, 2)
+
+    setTransferSecondaryFeatures(nextSecondary)
+    setTransferSelectedFeatures(
+      buildSelectedFeatures(transferPrimaryFeature, nextSecondary, currentTransferFeatureOptions, 2)
+    )
+  }}
+  maxSecondary={2}
 />
 
                   <div className="mb-2 mt-5 text-lg font-black">再簡短說明理由</div>
@@ -3585,13 +4806,33 @@ featureOptionPolicy: {
                     可用句型：「我觀察到＿＿特徵，所以我推測它可能屬於＿＿。」
                   </div>
                   <textarea
-                    value={transferReasonText}
-                    onChange={(e) => setTransferReasonText(e.target.value)}
-                    className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
-                    placeholder="請至少寫 8 個字，簡短說明你是根據哪些特徵做判斷"
-                  />
+  value={transferReasonText}
+  onChange={(e) => setTransferReasonText(e.target.value)}
+  className="min-h-[110px] w-full rounded-xl border border-gray-300 px-3 py-2"
+  placeholder="請至少寫 8 個字，簡短說明你是根據哪些特徵做判斷"
+/>
 
-                  <div className="mb-3 mt-5 text-lg font-black">接著選擇你判定的門別</div>
+<div className="mb-2 mt-5 text-lg font-black">再說明你排除其他門別的理由</div>
+<div className="mb-2 text-sm text-gray-600">
+  可用句型：「我沒有選＿＿門，是因為這個動物沒有＿＿特徵。」
+</div>
+<textarea
+  value={transferExclusionReasonText}
+  onChange={(e) => setTransferExclusionReasonText(e.target.value)}
+  className="min-h-[90px] w-full rounded-xl border border-gray-300 px-3 py-2"
+  placeholder="請至少寫 6 個字，說明你為什麼沒有選其他看起來相似的門別"
+/>
+
+<div className="mt-5">
+  <FamiliarityAndLearningControls
+    familiarity={transferFamiliarity}
+    setFamiliarity={setTransferFamiliarity}
+    learnedBefore={transferLearnedBefore}
+    setLearnedBefore={setTransferLearnedBefore}
+  />
+</div>
+
+<div className="mb-3 mt-5 text-lg font-black">接著選擇你判定的門別</div>
                   <div className="grid gap-2 md:grid-cols-2">
                     {SIX_PHYLA.map((option) => (
                       <label
@@ -3613,12 +4854,19 @@ featureOptionPolicy: {
                   <input
                     type="range"
                     min={1}
-                    max={4}
+                    max={5}
                     value={transferConfidence}
                     onChange={(e) => setTransferConfidence(Number(e.target.value))}
                     className="w-full"
                   />
-                  <div className="mt-1 text-sm text-gray-600">目前信心：{transferConfidence} / 4</div>
+                  <div className="mt-1 text-sm text-gray-600">
+                    目前信心：{transferConfidence} / 5
+                    {transferConfidence === 1 ? '（完全不確定）' : ''}
+                    {transferConfidence === 2 ? '（有點猜測）' : ''}
+                    {transferConfidence === 3 ? '（大致確定）' : ''}
+                    {transferConfidence === 4 ? '（很確定）' : ''}
+                    {transferConfidence === 5 ? '（非常確定，且能說明理由）' : ''}
+                  </div>
 
                   <div className="mt-5 rounded-xl bg-gray-50 p-3 text-sm leading-6 text-gray-700">
                     目前已完成 {transferResponses.length} / {transferQuestions.length} 題。這一階段的重點是把前面學到的規則用到新案例上。
@@ -3636,7 +4884,7 @@ featureOptionPolicy: {
                         }}
                         className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold sm:w-auto"
                       >
-                        回到階段 3
+                        回到階段 4
                       </button>
                       <button
                         type="button"
@@ -3677,17 +4925,26 @@ featureOptionPolicy: {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-gray-200 bg-white p-4">
-                  <div className="mb-2 text-lg font-black text-gray-900">你前面整理出的線索</div>
-                  <div className="text-sm leading-6 text-gray-700">
-                    <div>
-                      較有判斷力：{diagnosticFeatures.length ? diagnosticFeatures.join('、') : '尚未記錄'}
-                    </div>
-                    <div className="mt-2">
-                      較不穩定：{possibleFeatures.length ? possibleFeatures.join('、') : '尚未記錄'}
+                {formalResearchMode ? (
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <div className="mb-2 text-lg font-black text-gray-900">正式研究版提醒</div>
+                    <div className="text-sm leading-6 text-gray-700">
+                      本階段不顯示你前面整理出的線索，目的是避免提示影響遷移題表現。請依據你目前真正能使用的判準作答。
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <div className="mb-2 text-lg font-black text-gray-900">你前面整理出的線索</div>
+                    <div className="text-sm leading-6 text-gray-700">
+                      <div>
+                        較有判斷力：{diagnosticFeatures.length ? diagnosticFeatures.join('、') : '尚未記錄'}
+                      </div>
+                      <div className="mt-2">
+                        較不穩定：{possibleFeatures.length ? possibleFeatures.join('、') : '尚未記錄'}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </aside>
             </section>
           )}
@@ -3695,7 +4952,7 @@ featureOptionPolicy: {
           {stage === 'done' && (
   <section className="space-y-4">
     <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-      <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 5 階段：診斷式回饋</h2>
+      <h2 className="mb-3 text-2xl font-black sm:text-3xl">第 6 階段：診斷式回饋</h2>
 
       <div
         className={`rounded-xl p-4 text-sm leading-6 ${
@@ -3724,8 +4981,8 @@ featureOptionPolicy: {
       <SummaryBlock title="你目前的優勢">
         <div className="space-y-2">
           <div>
-            第 3 階段正確 {correctCount} / {stage3EvidenceQuestions.length} 題，
-            第 4 階段正確 {transferCorrectCount} / {transferQuestions.length} 題。
+            第 5 階段正確 {correctCount} / {stage3EvidenceQuestions.length} 題，
+            第 5 階段正確 {transferCorrectCount} / {transferQuestions.length} 題。
           </div>
           <div>
             較有判斷力的線索：
@@ -3876,7 +5133,7 @@ featureOptionPolicy: {
         </button>
       ) : (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-          研究版設定：查看回饋後不再回改正式答案。若要重做，請重新開始一次新的作答。
+          研究版設定：第 6 階段為資料鎖定後的診斷回饋；查看回饋後不再回改正式答案。若要重做，請重新開始一次新的作答。
         </div>
       )}
 

@@ -35,6 +35,16 @@ type LookupResult = {
 
 type EntryMode = 'roster' | 'manual'
 
+type PlatformMode =
+  | 'research_formal'
+  | 'teaching_demo'
+  | 'dev_test'
+
+type DataUseScope =
+  | 'main_research'
+  | 'teaching_only'
+  | 'excluded_test'
+
 type UserRole =
   | '國中學生'
   | '國小學生'
@@ -56,6 +66,12 @@ type AnimalClassificationExperience =
   | '正在學習中'
   | '已經學過'
   | '不確定'
+
+type LearningExperienceCode =
+  | 'before'
+  | 'during'
+  | 'after'
+  | 'unsure'
 
 const USER_ROLE_OPTIONS: UserRole[] = [
   '國中學生',
@@ -93,6 +109,10 @@ const TARGET_PATH = '/'
 const FIXED_SCHOOL_YEAR = '114'
 const FIXED_SEMESTER = '1'
 const ROSTER_ENTRY_PASSWORD = 'sci'
+const APP_VERSION = 'enter-2026-04-28-formal-research-metadata-v1'
+const ITEM_BANK_VERSION = 'itembank-2026-04-28-v1'
+const RUBRIC_VERSION = 'rubric-2026-04-28-v1'
+const CONSENT_VERSION = 'classroom-roster-2026-04-28-v1'
 
 const LOGO_URL =
   'https://lh3.googleusercontent.com/d/1c0UMLE6cig4BG247E7ALdODJnNX_-Y6L'
@@ -118,6 +138,48 @@ function numericAwareSort(values: string[]) {
 function inferGradeFromClassName(className: string) {
   const firstChar = className.trim().charAt(0)
   return /^\d$/.test(firstChar) ? firstChar : ''
+}
+
+function mapLearningExperience(
+  value: AnimalClassificationExperience | '' | null | undefined
+): LearningExperienceCode {
+  switch (value) {
+    case '尚未學過':
+      return 'before'
+    case '正在學習中':
+      return 'during'
+    case '已經學過':
+      return 'after'
+    case '不確定':
+    default:
+      return 'unsure'
+  }
+}
+
+function resolvePlatformMode(mode: EntryMode): {
+  platformMode: PlatformMode
+  dataUseScope: DataUseScope
+  taskVariant: 'formal' | 'demo'
+  formalRosterImported: boolean
+  researchMode: 'full_six_stage_research' | 'practice'
+} {
+  if (mode === 'roster') {
+    return {
+      platformMode: 'research_formal',
+      dataUseScope: 'main_research',
+      taskVariant: 'formal',
+      formalRosterImported: true,
+      researchMode: 'full_six_stage_research',
+    }
+  }
+
+  return {
+    platformMode: 'teaching_demo',
+    dataUseScope: 'teaching_only',
+    taskVariant: 'demo',
+    formalRosterImported: false,
+    researchMode: 'practice',
+  }
 }
 
 export default function EnterPage() {
@@ -448,6 +510,9 @@ function validateResearchBackground(mode: EntryMode) {
   const researchBackground = validateResearchBackground(mode)
   if (!researchBackground) return
 
+  const platformMeta = resolvePlatformMode(mode)
+  const enteredAt = new Date().toISOString()
+
   setIsEntering(true)
 
   try {
@@ -462,13 +527,29 @@ function validateResearchBackground(mode: EntryMode) {
       seatNo: base.seatNo,
       maskedName: base.maskedName,
       entryMode: mode,
+      platformMode: platformMeta.platformMode,
+      dataUseScope: platformMeta.dataUseScope,
+      taskVariant: platformMeta.taskVariant,
+      formalRosterImported: platformMeta.formalRosterImported,
+      appVersion: APP_VERSION,
+      itemBankVersion: ITEM_BANK_VERSION,
+      rubricVersion: RUBRIC_VERSION,
+      consentVersion: mode === 'roster' ? CONSENT_VERSION : undefined,
+      assentAccepted: mode === 'roster',
 
       userRole: researchBackground.userRole,
       useContext: researchBackground.useContext,
       animalClassificationExperience:
-        researchBackground.animalClassificationExperience,
+        researchBackground.animalClassificationExperience || '不確定',
+      learningExperience: mapLearningExperience(
+        researchBackground.animalClassificationExperience
+      ),
+      learningExperienceLabel:
+        researchBackground.animalClassificationExperience || '不確定',
+      researchMode: platformMeta.researchMode,
+      researchEntryVersion: APP_VERSION,
 
-      enteredAt: new Date().toISOString(),
+      enteredAt,
     }
 
       localStorage.setItem(
@@ -485,10 +566,27 @@ function validateResearchBackground(mode: EntryMode) {
   className: base.className,
   seatNo: base.seatNo,
   entryMode: mode,
+  platformMode: platformMeta.platformMode,
+  dataUseScope: platformMeta.dataUseScope,
+  taskVariant: platformMeta.taskVariant,
+  formalRosterImported: String(platformMeta.formalRosterImported),
+  appVersion: APP_VERSION,
+  itemBankVersion: ITEM_BANK_VERSION,
+  rubricVersion: RUBRIC_VERSION,
+  consentVersion: mode === 'roster' ? CONSENT_VERSION : '',
+  assentAccepted: String(mode === 'roster'),
+  enteredAt,
   userRole: researchBackground.userRole,
   useContext: researchBackground.useContext,
   animalClassificationExperience:
-    researchBackground.animalClassificationExperience,
+    researchBackground.animalClassificationExperience || '不確定',
+  learningExperience: mapLearningExperience(
+    researchBackground.animalClassificationExperience
+  ),
+  learningExperienceLabel:
+    researchBackground.animalClassificationExperience || '不確定',
+  researchMode: platformMeta.researchMode,
+  researchEntryVersion: APP_VERSION,
 })
 
       router.push(`${TARGET_PATH}?${params.toString()}`)
@@ -597,7 +695,7 @@ function validateResearchBackground(mode: EntryMode) {
         {entryMode === 'roster' ? (
           <>
             <div className="mb-4 rounded-xl border border-[#e6d8a8] bg-[#fff8df] px-4 py-3 text-sm leading-6 text-[#8b6a1a]">
-              正式參與：請先選擇學校、班級、座號並確認姓名；進入第一階段前需再輸入密碼。
+              正式參與：供已匯入名單的教師及學生使用。此模式供班級教學診斷與後續去識別化分析使用。請先選擇學校、班級、座號並確認姓名；進入第一階段前需再輸入密碼。
             </div>
 
             {rosterLoadError ? (

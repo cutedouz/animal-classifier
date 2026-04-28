@@ -9,10 +9,32 @@ type IncomingItemLog = {
   submittedAt: string | null
   durationMs: number | null
   finalAnswer: string
+
   selectedFeatures: string[]
+  primaryFeature?: string | null
+  secondaryFeatures?: string[]
+
+  featureOptionsShown?: string[]
+  featureOptionOrder?: string[]
+  randomSeed?: string | null
+  maxSelectableFeatures?: number | null
+  featureOptionVersion?: string | null
+
   reasonText: string
+  exclusionReasonText?: string | null
+
   confidence: number
+  familiarity?: number | null
+  learnedBefore?: 'yes' | 'no' | 'unsure' | string | null
+
   isCorrect: boolean | null
+  criterionQuality?: string | null
+  diagnosticHitCount?: number | null
+  acceptableHitCount?: number | null
+  auxiliaryCount?: number | null
+  misleadingCount?: number | null
+  highConfidenceError?: boolean | null
+  scoringRubricVersion?: string | null
 }
 
 type IncomingEventLog = {
@@ -30,9 +52,33 @@ function normalizeItemLog(item: IncomingItemLog) {
       )
     : []
 
+  const secondaryFeatures = Array.isArray(item.secondaryFeatures)
+    ? item.secondaryFeatures.filter(
+        (value) => typeof value === 'string' && value.trim().length > 0
+      )
+    : selectedFeatures.slice(1)
+
+  const featureOptionsShown = Array.isArray(item.featureOptionsShown)
+    ? item.featureOptionsShown.filter(
+        (value) => typeof value === 'string' && value.trim().length > 0
+      )
+    : []
+
+  const featureOptionOrder = Array.isArray(item.featureOptionOrder)
+    ? item.featureOptionOrder.filter(
+        (value) => typeof value === 'string' && value.trim().length > 0
+      )
+    : featureOptionsShown
+
   const reasonText =
     typeof item.reasonText === 'string' && item.reasonText.trim().length > 0
       ? item.reasonText.trim()
+      : null
+
+  const exclusionReasonText =
+    typeof item.exclusionReasonText === 'string' &&
+    item.exclusionReasonText.trim().length > 0
+      ? item.exclusionReasonText.trim()
       : null
 
   const finalAnswer =
@@ -49,8 +95,55 @@ function normalizeItemLog(item: IncomingItemLog) {
 
   const confidence =
     typeof item.confidence === 'number' && Number.isFinite(item.confidence)
-      ? item.confidence
+      ? Math.round(item.confidence)
       : null
+
+  const familiarity =
+    typeof item.familiarity === 'number' &&
+    Number.isFinite(item.familiarity)
+      ? Math.round(item.familiarity)
+      : null
+
+  const maxSelectableFeatures =
+    typeof item.maxSelectableFeatures === 'number' &&
+    Number.isFinite(item.maxSelectableFeatures)
+      ? Math.round(item.maxSelectableFeatures)
+      : null
+
+  const primaryFeature =
+    typeof item.primaryFeature === 'string' && item.primaryFeature.trim().length > 0
+      ? item.primaryFeature.trim()
+      : selectedFeatures[0] ?? null
+
+  const learnedBefore =
+    typeof item.learnedBefore === 'string' && item.learnedBefore.trim().length > 0
+      ? item.learnedBefore.trim()
+      : null
+
+  const criterionQuality =
+    typeof item.criterionQuality === 'string' && item.criterionQuality.trim().length > 0
+      ? item.criterionQuality.trim()
+      : null
+
+  const diagnosticHitCount =
+    typeof item.diagnosticHitCount === 'number' && Number.isFinite(item.diagnosticHitCount)
+      ? Math.round(item.diagnosticHitCount)
+      : 0
+
+  const acceptableHitCount =
+    typeof item.acceptableHitCount === 'number' && Number.isFinite(item.acceptableHitCount)
+      ? Math.round(item.acceptableHitCount)
+      : 0
+
+  const auxiliaryCount =
+    typeof item.auxiliaryCount === 'number' && Number.isFinite(item.auxiliaryCount)
+      ? Math.round(item.auxiliaryCount)
+      : 0
+
+  const misleadingCount =
+    typeof item.misleadingCount === 'number' && Number.isFinite(item.misleadingCount)
+      ? Math.round(item.misleadingCount)
+      : 0
 
   return {
     stage: item.stage,
@@ -62,13 +155,45 @@ function normalizeItemLog(item: IncomingItemLog) {
     final_answer: finalAnswer,
     selected_features: selectedFeatures,
     selected_features_count: selectedFeatures.length,
+    feature_selection_order: featureOptionOrder,
+    primary_feature: primaryFeature,
+    secondary_features: secondaryFeatures,
+    feature_options_shown: featureOptionsShown,
+    feature_option_order: featureOptionOrder,
+    random_seed:
+      typeof item.randomSeed === 'string' && item.randomSeed.trim().length > 0
+        ? item.randomSeed.trim()
+        : null,
+    max_selectable_features: maxSelectableFeatures,
+    feature_option_version:
+      typeof item.featureOptionVersion === 'string' &&
+      item.featureOptionVersion.trim().length > 0
+        ? item.featureOptionVersion.trim()
+        : null,
     reason_text: reasonText,
     reason_char_count: reasonText ? reasonText.length : 0,
+    exclusion_reason_text: exclusionReasonText,
+    exclusion_reason_char_count: exclusionReasonText ? exclusionReasonText.length : 0,
     confidence,
+    familiarity,
+    learned_before: learnedBefore,
     is_correct: typeof item.isCorrect === 'boolean' ? item.isCorrect : null,
+    criterion_quality: criterionQuality,
+    diagnostic_hit_count: diagnosticHitCount,
+    acceptable_hit_count: acceptableHitCount,
+    auxiliary_count: auxiliaryCount,
+    misleading_count: misleadingCount,
+    high_confidence_error:
+      typeof item.highConfidenceError === 'boolean' ? item.highConfidenceError : false,
+    scoring_rubric_version:
+      typeof item.scoringRubricVersion === 'string' &&
+      item.scoringRubricVersion.trim().length > 0
+        ? item.scoringRubricVersion.trim()
+        : null,
     updated_at: new Date().toISOString(),
   }
 }
+
 
 function dedupeItemLogs(items: IncomingItemLog[]) {
   const map = new Map<string, IncomingItemLog>()
@@ -132,6 +257,9 @@ export async function POST(req: Request) {
     const participant = body.participant ?? {}
     const payload = body.payload ?? {}
     const saveMode = String(body.saveMode ?? 'progress')
+
+    // 研究模式欄位目前先保留在 payload JSON 中，避免因資料庫尚未新增欄位而造成正式送出失敗。
+    // 若之後要做 SQL 索引，可再把 payload.platformMode / payload.dataUseScope 等欄位獨立展開到 learning_records。
     const currentStage =
       typeof body.currentStage === 'string' ? body.currentStage : null
     const isCompleted = Boolean(body.isCompleted)

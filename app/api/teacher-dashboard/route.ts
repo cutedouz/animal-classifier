@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import {
+  getTeacherAuthFromRequest,
+  recordMatchesTeacherAssignments,
+} from '../../../lib/teacherAuth'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,12 +33,37 @@ type LearningItemLogRow = {
   submitted_at: string | null
   duration_ms: number | null
   final_answer: string | null
+
   selected_features: string[] | null
   selected_features_count: number | null
+  feature_selection_order?: string[] | null
+
+  primary_feature?: string | null
+  secondary_features?: string[] | null
+  feature_options_shown?: string[] | null
+  feature_option_order?: string[] | null
+  random_seed?: string | null
+  max_selectable_features?: number | null
+  feature_option_version?: string | null
+
   reason_text: string | null
   reason_char_count: number | null
+  exclusion_reason_text?: string | null
+  exclusion_reason_char_count?: number | null
+
   confidence: number | null
+  familiarity?: number | null
+  learned_before?: string | null
+
   is_correct: boolean | null
+  criterion_quality?: string | null
+  diagnostic_hit_count?: number | null
+  acceptable_hit_count?: number | null
+  auxiliary_count?: number | null
+  misleading_count?: number | null
+  high_confidence_error?: boolean | null
+  scoring_rubric_version?: string | null
+
   primaryHitCount?: number
   acceptableHitCount?: number
   supportingHitCount?: number
@@ -115,6 +144,17 @@ type QuestionMetric = {
   topWrongAnswers: string[]
   topWrongFeatures: string[]
   highConfidenceWrongRate: number | null
+
+  highFeatureQualityCount: number
+  partialFeatureQualityCount: number
+  surfaceOrMisleadingCount: number
+  unclearFeatureQualityCount: number
+  highFeatureQualityRate: number | null
+  surfaceOrMisleadingRate: number | null
+  avgPrimaryHitCount: number | null
+  avgMisleadingHitCount: number | null
+  topPrimaryFeatures: string[]
+  topMisleadingFeatures: string[]
 }
 
 type FeatureMetric = {
@@ -376,7 +416,7 @@ const QUESTION_FEATURE_RUBRICS: Record<string, FeatureRubric> = {
   },
 }
 
-const STAGE_KEYS = ['stage1', 'awareness', 'evidence', 'transfer', 'done']
+const STAGE_KEYS = ['stage1', 'reflection', 'guide', 'evidence', 'transfer', 'done', 'awareness']
 
 function round(value: number, digits = 1) {
   const factor = 10 ** digits
@@ -521,6 +561,31 @@ function analyzeSelectedFeatureQuality(animalName: string, selectedFeatures: unk
   }
 }
 
+function mapCriterionQuality(value: unknown): LearningItemLogRow['featureQuality'] | null {
+  if (value === 'high_quality' || value === 'high') return 'high'
+  if (value === 'partial_mastery' || value === 'partial') return 'partial'
+  if (value === 'surface_or_misleading') return 'surface_or_misleading'
+  if (value === 'unclear') return 'unclear'
+  return null
+}
+
+function normalizeItemLogFeatures(item: LearningItemLogRow) {
+  const fromSelected = Array.isArray(item.selected_features)
+    ? item.selected_features
+    : []
+
+  const fromPrimary =
+    typeof item.primary_feature === 'string' && item.primary_feature.trim().length > 0
+      ? [item.primary_feature]
+      : []
+
+  const fromSecondary = Array.isArray(item.secondary_features)
+    ? item.secondary_features
+    : []
+
+  return normalizeFeatures([...fromPrimary, ...fromSecondary, ...fromSelected])
+}
+
 function cueType(feature: string): FeatureMetric['cueType'] {
   const normalized = normalizeFeatureName(feature)
 
@@ -547,7 +612,14 @@ function safeNumber(value: unknown) {
 
 function parsePayloadInfo(payload: JsonRecord | null) {
   const stage1 = toObject(payload?.stage1)
-  const awareness = toObject(payload?.awareness)
+  const legacyAwareness = toObject(payload?.awareness)
+  const reflection = toObject(payload?.reflection)
+  const guide = toObject(payload?.guide)
+  const awareness = {
+    ...(reflection ?? {}),
+    ...(guide ?? {}),
+    ...(legacyAwareness ?? {}),
+  } as JsonRecord
   const stage1Groups = toArray(stage1?.groups)
     .map((group) => toObject(group))
     .filter(Boolean) as JsonRecord[]
@@ -610,6 +682,22 @@ export async function GET(req: NextRequest) {
     }
 
     const admin = createClient(supabaseUrl, serviceRoleKey)
+    const teacherAuth = await getTeacherAuthFromRequest(req, admin)
+
+    if (!teacherAuth) {
+      return NextResponse.json(
+        { error: '教師尚未登入或登入已過期。' },
+        { status: 401 }
+      )
+    }
+
+    if (teacherAuth.assignments.length === 0) {
+      return NextResponse.json(
+        { error: '此教師帳號尚未設定可查看班級。' },
+        { status: 403 }
+      )
+    }
+
     const searchParams = req.nextUrl.searchParams
 
     const schoolCode = searchParams.get('schoolCode')?.trim() ?? ''
@@ -642,7 +730,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: recordError.message }, { status: 500 })
     }
 
-    const recordRows = (records ?? []) as LearningRecordRow[]
+    const recordRows = ((records ?? []) as LearningRecordRow[]).filter((record) =>
+      recordMatchesTeacherAssignments(record, teacherAuth.assignments)
+    )
     const allRecordIds = recordRows.map((record) => record.id)
 
     const [filterValuesResponse, itemLogsResponse, eventLogsResponse] = await Promise.all([
@@ -650,7 +740,7 @@ export async function GET(req: NextRequest) {
       allRecordIds.length > 0
         ? admin
             .from('learning_item_logs')
-            .select('record_id, participant_code, stage, question_id, animal_name, entered_at, submitted_at, duration_ms, final_answer, selected_features, selected_features_count, reason_text, reason_char_count, confidence, is_correct')
+            .select('record_id, participant_code, stage, question_id, animal_name, entered_at, submitted_at, duration_ms, final_answer, selected_features, selected_features_count, feature_selection_order, primary_feature, secondary_features, feature_options_shown, feature_option_order, random_seed, max_selectable_features, feature_option_version, reason_text, reason_char_count, exclusion_reason_text, exclusion_reason_char_count, confidence, familiarity, learned_before, is_correct, criterion_quality, diagnostic_hit_count, acceptable_hit_count, auxiliary_count, misleading_count, high_confidence_error, scoring_rubric_version')
             .in('record_id', allRecordIds)
         : Promise.resolve({ data: [], error: null }),
       allRecordIds.length > 0
@@ -790,23 +880,38 @@ const filteredStudents = riskOnly
     const filteredItems = itemLogs.filter((item) => filteredRecordIds.has(item.record_id))
 
 const enrichedItems = filteredItems.map((item) => {
+  const selectedFeatures = normalizeItemLogFeatures(item)
   const quality = analyzeSelectedFeatureQuality(
     item.animal_name ?? '',
-    item.selected_features ?? []
+    selectedFeatures
   )
+  const dbFeatureQuality = mapCriterionQuality(item.criterion_quality)
 
   return {
     ...item,
-    selected_features: quality.selectedFeatures,
-    primaryHitCount: quality.primaryHitCount,
-    acceptableHitCount: quality.acceptableHitCount,
-    supportingHitCount: quality.supportingHitCount,
-    misleadingHitCount: quality.misleadingHitCount,
+    selected_features: selectedFeatures,
+    selected_features_count: item.selected_features_count ?? selectedFeatures.length,
+    primaryHitCount:
+      typeof item.diagnostic_hit_count === 'number'
+        ? item.diagnostic_hit_count
+        : quality.primaryHitCount,
+    acceptableHitCount:
+      typeof item.acceptable_hit_count === 'number'
+        ? item.acceptable_hit_count
+        : quality.acceptableHitCount,
+    supportingHitCount:
+      typeof item.auxiliary_count === 'number'
+        ? item.auxiliary_count
+        : quality.supportingHitCount,
+    misleadingHitCount:
+      typeof item.misleading_count === 'number'
+        ? item.misleading_count
+        : quality.misleadingHitCount,
     selectedPrimaryFeatures: quality.selectedPrimaryFeatures,
     selectedAcceptableFeatures: quality.selectedAcceptableFeatures,
     selectedSupportingFeatures: quality.selectedSupportingFeatures,
     selectedMisleadingFeatures: quality.selectedMisleadingFeatures,
-    featureQuality: quality.featureQuality,
+    featureQuality: dbFeatureQuality ?? quality.featureQuality,
   }
 })
 
@@ -856,8 +961,8 @@ const transferItems = enrichedItems.filter((item) => item.stage === 'transfer')
     }
 
     const sampleWarnings = [
-      denominatorWarning('第 3 階段 evidence', evidenceStudents, filteredStudents.length),
-      denominatorWarning('第 4 階段 transfer', transferStudents, filteredStudents.length),
+      denominatorWarning('第 4 階段 evidence', evidenceStudents, filteredStudents.length),
+      denominatorWarning('第 5 階段 transfer', transferStudents, filteredStudents.length),
       denominatorWarning('圖片放大事件', zoomStudents, filteredStudents.length),
     ].filter(Boolean) as SampleWarning[]
 
@@ -902,27 +1007,68 @@ for (const item of enrichedItems) {
           acc[feature] = (acc[feature] ?? 0) + 1
           return acc
         }, {})
-        const highConfidenceWrong = items.filter((item) => item.is_correct === false && (item.confidence ?? 0) >= 3).length
+        const highConfidenceWrong = items.filter((item) => item.is_correct === false && (item.high_confidence_error === true || (item.confidence ?? 0) >= 4)).length
+
+        const highFeatureQualityCount = items.filter(
+  (item) => item.featureQuality === 'high'
+).length
+
+const partialFeatureQualityCount = items.filter(
+  (item) => item.featureQuality === 'partial'
+).length
+
+const surfaceOrMisleadingCount = items.filter(
+  (item) => item.featureQuality === 'surface_or_misleading'
+).length
+
+const unclearFeatureQualityCount = items.filter(
+  (item) => item.featureQuality === 'unclear'
+).length
+
+const primaryFeatureMap = items
+  .flatMap((item) => item.selectedPrimaryFeatures ?? [])
+  .reduce<Record<string, number>>((acc, feature) => {
+    acc[feature] = (acc[feature] ?? 0) + 1
+    return acc
+  }, {})
+
+const misleadingFeatureMap = items
+  .flatMap((item) => item.selectedMisleadingFeatures ?? [])
+  .reduce<Record<string, number>>((acc, feature) => {
+    acc[feature] = (acc[feature] ?? 0) + 1
+    return acc
+  }, {})
 
         return {
-          key,
-          stage,
-          questionId,
-          animalName: items[0]?.animal_name ?? null,
-          respondents,
-          studentCount,
-          accuracy: ratio(correctCount, respondents),
-          avgDurationSec: average(items.map((item) => (item.duration_ms == null ? null : item.duration_ms / 1000))),
-          medianDurationSec: median(items.map((item) => (item.duration_ms == null ? null : item.duration_ms / 1000))),
-          avgConfidence: average(items.map((item) => item.confidence)),
-          avgSelectedFeatureCount: average(items.map((item) => item.selected_features_count)),
-          avgReasonCharCount: average(items.map((item) => item.reason_char_count)),
-          zoomOpenCount: zoomOpenEvents.length,
-          zoomUserRate: ratio(uniqueZoomUsers, studentCount),
-          topWrongAnswers: pickTopCounts(wrongAnswersMap, 3),
-          topWrongFeatures: pickTopCounts(wrongFeaturesMap, 3),
-          highConfidenceWrongRate: ratio(highConfidenceWrong, respondents),
-        }
+  key,
+  stage,
+  questionId,
+  animalName: items[0]?.animal_name ?? null,
+  respondents,
+  studentCount,
+  accuracy: ratio(correctCount, respondents),
+  avgDurationSec: average(items.map((item) => (item.duration_ms == null ? null : item.duration_ms / 1000))),
+  medianDurationSec: median(items.map((item) => (item.duration_ms == null ? null : item.duration_ms / 1000))),
+  avgConfidence: average(items.map((item) => item.confidence)),
+  avgSelectedFeatureCount: average(items.map((item) => item.selected_features_count)),
+  avgReasonCharCount: average(items.map((item) => item.reason_char_count)),
+  zoomOpenCount: zoomOpenEvents.length,
+  zoomUserRate: ratio(uniqueZoomUsers, studentCount),
+  topWrongAnswers: pickTopCounts(wrongAnswersMap, 3),
+  topWrongFeatures: pickTopCounts(wrongFeaturesMap, 3),
+  highConfidenceWrongRate: ratio(highConfidenceWrong, respondents),
+
+  highFeatureQualityCount,
+  partialFeatureQualityCount,
+  surfaceOrMisleadingCount,
+  unclearFeatureQualityCount,
+  highFeatureQualityRate: ratio(highFeatureQualityCount, respondents),
+  surfaceOrMisleadingRate: ratio(surfaceOrMisleadingCount, respondents),
+  avgPrimaryHitCount: average(items.map((item) => item.primaryHitCount ?? null)),
+  avgMisleadingHitCount: average(items.map((item) => item.misleadingHitCount ?? null)),
+  topPrimaryFeatures: pickTopCounts(primaryFeatureMap, 3),
+  topMisleadingFeatures: pickTopCounts(misleadingFeatureMap, 3),
+}
       })
       .sort((a, b) => {
         const aPenalty = ((a.accuracy ?? 1) * 100) + (a.avgDurationSec ?? 0) * 0.25
@@ -994,7 +1140,7 @@ for (const item of enrichedItems.filter((row) => row.is_correct === false)) {
         current._students.add(item.participant_code)
         current._questions.add(`${item.stage}-${item.question_id}`)
 
-        if ((item.confidence ?? 0) >= 3) {
+        if (item.high_confidence_error === true || (item.confidence ?? 0) >= 4) {
           current.highConfidenceWrongCount += 1
         }
 
@@ -1027,7 +1173,7 @@ for (const item of enrichedItems.filter((row) => row.is_correct === false)) {
       .sort((a, b) => (b.transferAccuracy ?? 0) - (a.transferAccuracy ?? 0))
       .slice(0, 10)
 
-    const filterRows = (filterValuesResponse.data ?? []) as Array<{ school_code: string | null; grade: string | null; class_name: string | null }>
+    const filterRows = (filterValuesResponse.data ?? []).filter((row: any) => recordMatchesTeacherAssignments(row, teacherAuth.assignments)) as Array<{ school_code: string | null; grade: string | null; class_name: string | null }>
     const filters: FiltersResponse = {
   schoolCodes: unique(filterRows.map((row) => row.school_code).filter(Boolean) as string[]).sort(),
   grades: unique(filterRows.map((row) => row.grade).filter(Boolean) as string[]).sort(),
