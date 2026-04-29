@@ -691,7 +691,7 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    if (teacherAuth.assignments.length === 0) {
+    if (!teacherAuth.isSuperAdmin && teacherAuth.assignments.length === 0) {
       return NextResponse.json(
         { error: '此教師帳號尚未設定可查看班級。' },
         { status: 403 }
@@ -731,7 +731,7 @@ export async function GET(req: NextRequest) {
     }
 
     const recordRows = ((records ?? []) as LearningRecordRow[]).filter((record) =>
-      recordMatchesTeacherAssignments(record, teacherAuth.assignments)
+      recordMatchesTeacherAssignments(record, teacherAuth.assignments, teacherAuth.isSuperAdmin)
     )
     const allRecordIds = recordRows.map((record) => record.id)
 

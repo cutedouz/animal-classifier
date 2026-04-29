@@ -17,7 +17,9 @@ export type TeacherAuth = {
     username: string | null
     email: string | null
     displayName: string
+    isSuperAdmin: boolean
   }
+  isSuperAdmin: boolean
   assignments: TeacherAssignment[]
 }
 
@@ -144,7 +146,7 @@ export async function getTeacherAuthFromRequest(
 
   const { data: teacher, error: teacherError } = await admin
     .from('teacher_accounts')
-    .select('id, username, email, display_name, is_active')
+    .select('id, username, email, display_name, is_active, is_super_admin')
     .eq('id', session.teacher_id)
     .maybeSingle()
 
@@ -165,13 +167,17 @@ export async function getTeacherAuthFromRequest(
     .update({ last_seen_at: new Date().toISOString() })
     .eq('session_token_hash', sessionTokenHash)
 
+  const isSuperAdmin = teacher.is_super_admin === true
+
   return {
     teacher: {
       id: String(teacher.id),
       username: safeString(teacher.username),
       email: safeString(teacher.email),
       displayName: safeString(teacher.display_name) ?? '未命名教師',
+      isSuperAdmin,
     },
+    isSuperAdmin,
     assignments: (assignments ?? [])
       .map((row: any) => ({
         school_code: String(row.school_code ?? ''),
@@ -189,8 +195,11 @@ export function recordMatchesTeacherAssignments(
     grade?: string | null
     class_name?: string | null
   },
-  assignments: TeacherAssignment[]
+  assignments: TeacherAssignment[],
+  isSuperAdmin = false
 ) {
+  if (isSuperAdmin) return true
+
   return assignments.some((assignment) => {
     const schoolMatches = record.school_code === assignment.school_code
     const classMatches = record.class_name === assignment.class_name

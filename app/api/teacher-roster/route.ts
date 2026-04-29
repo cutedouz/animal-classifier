@@ -21,6 +21,47 @@ function toGradeNumber(value: string | null) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+
+async function loadAllRosterClasses(admin: any) {
+  const { data, error } = await admin
+    .from('student_roster')
+    .select('school_code, grade, class_name')
+    .order('school_code', { ascending: true })
+    .order('grade', { ascending: true })
+    .order('class_name', { ascending: true })
+
+  if (error) throw new Error(error.message)
+
+  const seen = new Set<string>()
+  const classes: Array<{
+    school_code: string
+    school_name: string | null
+    grade: string | null
+    class_name: string
+  }> = []
+
+  for (const row of data ?? []) {
+    const schoolCode = String(row.school_code ?? '').trim()
+    const className = String(row.class_name ?? '').trim()
+    const grade = row.grade == null ? null : String(row.grade)
+
+    if (!schoolCode || !className) continue
+
+    const key = `${schoolCode}::${grade ?? ''}::${className}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    classes.push({
+      school_code: schoolCode,
+      school_name: schoolCode,
+      grade,
+      class_name: className,
+    })
+  }
+
+  return classes
+}
+
 export async function GET(req: NextRequest) {
   try {
     const admin = adminClient()
@@ -33,9 +74,13 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    const sourceClasses = teacherAuth.isSuperAdmin
+      ? await loadAllRosterClasses(admin)
+      : teacherAuth.assignments
+
     const classes = []
 
-    for (const assignment of teacherAuth.assignments) {
+    for (const assignment of sourceClasses) {
       let query = admin
         .from('student_roster')
         .select('id, school_code, grade, class_name, seat_no, student_name, masked_name, is_active, note, created_at, updated_at')

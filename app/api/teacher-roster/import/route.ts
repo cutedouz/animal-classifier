@@ -149,7 +149,8 @@ export async function POST(req: NextRequest) {
         grade: String(gradeNumber),
         class_name: className,
       },
-      teacherAuth.assignments
+      teacherAuth.assignments,
+      teacherAuth.isSuperAdmin
     )
 
     if (!authorized) {

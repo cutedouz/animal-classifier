@@ -2,23 +2,48 @@
 
 import { useState } from 'react'
 
-type ExportKind = 'item_level_latest' | 'student_summary' | 'class_summary'
+type ExportKind = 'item_level_latest' | 'student_summary' | 'class_summary' | 'record_status' | 'roster_class_summary' | 'roster_school_summary' | 'record_status' | 'roster_class_summary' | 'roster_school_summary'
 
-const EXPORTS: Array<{ kind: ExportKind; title: string; description: string }> = [
+const EXPORTS: Array<{
+  kind: ExportKind
+  title: string
+  description: string
+}> = [
   {
     kind: 'item_level_latest',
     title: '題目層級最新有效資料',
-    description: '一列為一位學生在一個階段的一題作答。使用 latest_learning_item_logs，適合 GLMM 與題目層級診斷。',
+    description:
+      '一列為一位學生在一個階段的一題作答。使用 latest_learning_item_logs，適合 GLMM 與題目層級診斷。',
   },
   {
     kind: 'student_summary',
     title: '學生層級摘要',
-    description: '一列為一位學生。包含 evidence / transfer 正確率、判準品質比例、誤導線索與高信心錯誤率，適合 LPA。',
+    description:
+      '一列為一位學生。包含 evidence / transfer 正確率、判準品質比例、誤導線索與高信心錯誤率，適合 LPA。',
   },
   {
     kind: 'class_summary',
     title: '班級層級摘要',
-    description: '一列為一個班級。包含班級平均正確率、遷移落差、判準品質與高信心錯誤摘要。',
+    description:
+      '一列為一個班級。包含班級平均正確率、遷移落差、判準品質與高信心錯誤摘要。',
+  },
+  {
+    kind: 'record_status',
+    title: '學生進度與資料狀態',
+    description:
+      '一列為一筆 learning_records。可檢查學生目前階段、是否完成、資料用途、是否納入主研究與排除原因。',
+  },
+  {
+    kind: 'roster_class_summary',
+    title: '正式名單班級摘要',
+    description:
+      '一列為 student_roster 中的一個班級。可檢查已匯入班級、啟用學生數與停用學生數。',
+  },
+  {
+    kind: 'roster_school_summary',
+    title: '正式名單學校摘要',
+    description:
+      '一列為 student_roster 中的一所學校。可檢查已匯入學校數、班級數與學生數。',
   },
 ]
 
@@ -81,7 +106,7 @@ export default function AdminResearchExportPage() {
             <div>
               <h1 className="text-3xl font-black tracking-tight text-gray-900">研究資料匯出</h1>
               <p className="mt-2 text-sm leading-6 text-gray-600">
-                此頁供管理者下載正式分析前的 CSV。匯出資料使用 latest_learning_item_logs，避免同一學生同一階段同一題重複作答被重複計算。
+                此頁供管理者下載正式分析前的 CSV。匯出資料使用 latest_learning_item_logs，避免同一學生同一階段同一題重複作答被重複計算。v2 另新增學生進度與正式名單覆蓋率匯出。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
