@@ -666,6 +666,22 @@ function validateResearchBackground(mode: EntryMode) {
           </p>
         </div>
 
+        <div className="mb-6 rounded-2xl border border-[#dfe8df] bg-[#fbfdfb] p-4 text-left">
+          <div className="text-sm font-black text-[#234a2c]">教師想帶班級使用？</div>
+          <p className="mt-2 text-sm leading-6 text-[#667266]">
+            若您是教師，想讓全班學生使用本平台並取得班級診斷回饋，請先申請教師帳號。
+            審核通過後，您可以登入教師診斷頁、匯入班級學生名單，並查看班級分類判準與學習表現分析。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a href="/teacher/apply" className="rounded-xl bg-[#234a2c] px-4 py-2 text-sm font-bold text-white">
+              申請教師帳號
+            </a>
+            <a href="/teacher" className="rounded-xl border border-[#c8d2c8] bg-white px-4 py-2 text-sm font-bold text-[#234a2c]">
+              已取得帳號，前往教師診斷頁
+            </a>
+          </div>
+        </div>
+
         <div className="mb-6 grid grid-cols-2 gap-3">
           <button
             type="button"
