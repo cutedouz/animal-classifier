@@ -633,6 +633,261 @@ function SummaryCard({
   )
 }
 
+
+function getDominantTeachingIssue(data: DashboardResponse, qualitative: QualitativeResponse | null) {
+  const totalFeature = featureQualityTotal(data.featureQualitySummary)
+  const surfaceRate = totalFeature > 0 ? data.featureQualitySummary.surfaceOrMisleading / totalFeature : null
+  const transferDrop = data.summary.sdi ?? null
+  const highConfidenceWrong = data.questionMetrics.reduce(
+    (sum, q) => sum + Math.round((q.highConfidenceWrongRate ?? 0) * q.respondents),
+    0
+  )
+  const qualitativeSurfaceRate = qualitative?.summary.surfaceReasonRate ?? null
+  const missingExclusionRate = qualitative?.summary.missingExclusionRate ?? null
+
+  if (transferDrop != null && transferDrop >= 0.2) {
+    return {
+      label: "鷹架依賴：有提示會做，無提示遷移較弱",
+      severity: "warn" as const,
+      evidence: `第 4 階段正確率 ${pct(data.summary.evidenceAccuracy)}，第 5 階段正確率 ${pct(data.summary.transferAccuracy)}，離開提示後落差 ${num(transferDrop, 2)}。`,
+      implication: "下一節課應減少提示卡，要求學生先說出分類判準，再選答案。",
+    }
+  }
+
+  if ((surfaceRate ?? 0) >= 0.3 || (qualitativeSurfaceRate ?? 0) >= 0.3) {
+    return {
+      label: "表面線索依賴：學生容易用外觀或棲地判斷",
+      severity: "strong" as const,
+      evidence: `表面／誤導線索比例 ${pct(surfaceRate)}；理由文字中的表面語彙比例 ${pct(qualitativeSurfaceRate)}。`,
+      implication: "下一節課應使用外觀相似但門別不同的動物進行對比，讓學生分辨可用判準與不可用線索。",
+    }
+  }
+
+  if (highConfidenceWrong >= 3) {
+    return {
+      label: "高信心錯誤：部分學生對錯誤判準有把握",
+      severity: "strong" as const,
+      evidence: "目前題目層級資料中出現多個高信心錯誤訊號；質性區塊可檢視學生錯誤理由。",
+      implication: "下一節課適合用反例與概念衝突，引導學生修正看似合理但不具診斷力的判準。",
+    }
+  }
+
+  if ((missingExclusionRate ?? 0) >= 0.5) {
+    return {
+      label: "排除理由不足：學生較少說明為什麼不是其他門",
+      severity: "warn" as const,
+      evidence: `缺少排除理由比例 ${pct(missingExclusionRate)}。`,
+      implication: "下一節課應要求學生除了解釋為什麼選某一門，也要說明為什麼排除另一個相似門別。",
+    }
+  }
+
+  return {
+    label: "判準穩定化：從答對走向能解釋",
+    severity: "info" as const,
+    evidence: "目前沒有單一高風險訊號壓倒其他問題。建議以題目診斷與學生理由文字作為下一步教學依據。",
+    implication: "下一節課可要求學生用一句話說出最主要判準，並用另一句話排除相似門別。",
+  }
+}
+
+function pickTeachingContrast(data: DashboardResponse, qualitative: QualitativeResponse | null) {
+  const topFeature = data.misconceptionMetrics[0]?.feature ?? ""
+  const topQuestion = [...data.questionMetrics].sort((a, b) => teachingPriorityScore(b) - teachingPriorityScore(a))[0]
+  const surfacePattern = qualitative?.patterns.find((p) => p.key === "surface_reason")
+  const text = `${topFeature} ${topQuestion?.animalName ?? ""} ${(surfacePattern?.examples ?? []).join(" ")}`
+
+  if (/有殼|硬殼|殼|外表/.test(text)) {
+    return {
+      title: "硬殼／有殼不是充分判準",
+      animals: "蛤蠣 vs 螃蟹 vs 海膽",
+      purpose: "三者都可能被學生描述為有殼或硬硬的，但分類判準分別涉及外套膜與肌肉足、外骨骼與有關節附肢、棘皮與管足。",
+      prompt: "如果三種動物都有硬的外觀，為什麼不能只用「有殼」分類？",
+    }
+  }
+
+  if (/細長|柔軟|體節|分節/.test(text)) {
+    return {
+      title: "身體細長不是環節動物的充分判準",
+      animals: "蚯蚓 vs 水蛭 vs 海參",
+      purpose: "讓學生區分身體細長、身體柔軟、真正的體節與棘皮動物的管足特徵。",
+      prompt: "海參看起來細長，為什麼不能直接判斷為環節動物？",
+    }
+  }
+
+  if (/水中|海水|海裡|生活/.test(text)) {
+    return {
+      title: "生活環境不是門別分類判準",
+      animals: "水母 vs 蝦子 vs 海星",
+      purpose: "三者都生活在水中，但核心判準分別是刺絲胞、外骨骼與附肢有關節、棘皮與管足。",
+      prompt: "如果很多門的動物都生活在水中，水中生活能不能作為主要分類依據？",
+    }
+  }
+
+  if (/觸手/.test(text)) {
+    return {
+      title: "觸手外觀要回到結構與功能判準",
+      animals: "水母 vs 烏賊",
+      purpose: "讓學生比較刺絲胞動物的觸手與軟體動物頭足類的腕足，避免只用外觀相似判斷。",
+      prompt: "兩者都有像觸手的構造，分類時還要看哪些更核心的特徵？",
+    }
+  }
+
+  if (/固著|珊瑚|海葵/.test(text)) {
+    return {
+      title: "固著生活不是分類充分條件",
+      animals: "珊瑚 vs 海葵 vs 水母",
+      purpose: "三者外觀與生活方式不同，但可回到刺絲胞與輻射對稱等共同判準。",
+      prompt: "珊瑚看起來不像一般動物，為什麼仍可與海葵、水母放在同一類討論？",
+    }
+  }
+
+  return {
+    title: "外觀相似不等於同一門",
+    animals: topQuestion?.animalName ? `${topQuestion.animalName} 與一個外觀相似但不同門別的動物` : "本班錯誤率較高的兩個動物",
+    purpose: "讓學生先說可用判準，再說不可用線索，避免只靠直覺分類。",
+    prompt: "這個特徵能不能排除其他門？如果不能，它就不適合作為主要判準。",
+  }
+}
+
+function buildTeacherPrompts(issue: ReturnType<typeof getDominantTeachingIssue>, contrast: ReturnType<typeof pickTeachingContrast>) {
+  if (issue.label.includes("鷹架")) {
+    return [
+      "請先不要看提示卡，自己寫出最重要的一個分類判準。",
+      "有提示時你依據什麼判斷？沒有提示時你改用什麼線索？",
+      "請把這題的判準拿去判斷另一個新動物，看看是否仍然適用。",
+    ]
+  }
+
+  if (issue.label.includes("表面")) {
+    return [
+      contrast.prompt,
+      "這個特徵只是看起來明顯，還是真的能區分不同門？",
+      "請說出一個不能只靠外觀判斷的理由。",
+    ]
+  }
+
+  if (issue.label.includes("高信心")) {
+    return [
+      "你很有把握的理由是什麼？這個理由有沒有反例？",
+      "請找一個也符合你理由、但其實屬於不同門的動物。",
+      "如果這個判準會導致錯分，它需要怎麼修正？",
+    ]
+  }
+
+  if (issue.label.includes("排除")) {
+    return [
+      "你為什麼沒有選另一個看起來相似的門？",
+      "請用「不是……因為……」寫出排除理由。",
+      "如果只說為什麼選它，還缺少哪一個判斷步驟？",
+    ]
+  }
+
+  return [
+    "你選的這個特徵，能不能排除其他動物門？",
+    "這個線索是外觀線索，還是具有分類診斷力的結構判準？",
+    "如果另一種動物也有這個特徵，你還會用它當主要分類依據嗎？",
+  ]
+}
+
+function InstructionalPrescriptionSection({
+  data,
+  qualitative,
+}: {
+  data: DashboardResponse
+  qualitative: QualitativeResponse | null
+}) {
+  const issue = getDominantTeachingIssue(data, qualitative)
+  const contrast = pickTeachingContrast(data, qualitative)
+  const prompts = buildTeacherPrompts(issue, contrast)
+  const topQuestion = [...data.questionMetrics].sort((a, b) => teachingPriorityScore(b) - teachingPriorityScore(a))[0]
+  const supportCounts = data.studentRows.reduce<Record<string, number>>((acc, student) => {
+    const support = classifySupport(student).label
+    acc[support] = (acc[support] ?? 0) + 1
+    return acc
+  }, {})
+
+  return (
+    <Section
+      title="本班教學處方：下一節課怎麼教"
+      subtitle="整合量化表現、判準品質與理由文字，轉換成教師可直接使用的教學行動。"
+    >
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className={`rounded-2xl border p-5 ${severityTone(issue.severity)}`}>
+          <div className="text-sm font-bold">核心診斷</div>
+          <h3 className="mt-2 text-xl font-black">{issue.label}</h3>
+          <p className="mt-3 text-sm leading-6">{issue.evidence}</p>
+          <p className="mt-3 text-sm leading-6 font-semibold">{issue.implication}</p>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-5">
+          <div className="text-sm font-bold text-gray-500">推薦對比案例</div>
+          <h3 className="mt-2 text-xl font-black text-gray-900">{contrast.title}</h3>
+          <div className="mt-2 rounded-xl bg-gray-50 px-3 py-2 text-sm font-bold text-gray-800">
+            {contrast.animals}
+          </div>
+          <p className="mt-3 text-sm leading-6 text-gray-600">{contrast.purpose}</p>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-5">
+          <div className="text-sm font-bold text-gray-500">本班優先處理題目</div>
+          {topQuestion ? (
+            <>
+              <h3 className="mt-2 text-xl font-black text-gray-900">
+                {stageLabel(topQuestion.stage)}｜{topQuestion.animalName ?? topQuestion.questionId}
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-gray-600">
+                正確率 {pct(topQuestion.accuracy)}；表面／誤導線索比例 {pct(topQuestion.surfaceOrMisleadingRate)}；高信心錯誤比例 {pct(topQuestion.highConfidenceWrongRate)}。
+              </p>
+            </>
+          ) : (
+            <p className="mt-3 text-sm leading-6 text-gray-600">目前尚無足夠題目資料可排序。</p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+          <h3 className="text-lg font-black text-gray-900">可直接帶進課堂的追問句</h3>
+          <ol className="mt-3 space-y-2 text-sm leading-6 text-gray-700">
+            {prompts.map((prompt, index) => (
+              <li key={prompt} className="flex gap-2">
+                <span className="font-black text-gray-400">{index + 1}.</span>
+                <span>{prompt}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+          <h3 className="text-lg font-black text-gray-900">15 分鐘活動流程</h3>
+          <div className="mt-3 space-y-3 text-sm leading-6 text-gray-700">
+            <p><span className="font-bold">第 1 步｜個人判斷：</span>學生先不看提示卡，寫下主要分類判準。</p>
+            <p><span className="font-bold">第 2 步｜小組對比：</span>使用「{contrast.animals}」比較可用判準與不可用線索。</p>
+            <p><span className="font-bold">第 3 步｜排除理由：</span>每組必須用「不是……因為……」說明至少一個排除判斷。</p>
+            <p><span className="font-bold">第 4 步｜全班回收：</span>教師整理本班最常誤用的線索，建立「不可單獨作為分類判準」清單。</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-gray-200 bg-white p-5">
+        <h3 className="text-lg font-black text-gray-900">分組與支持建議</h3>
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          {Object.entries(supportCounts).map(([label, count]) => (
+            <div key={label} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+              <div className="text-sm font-bold text-gray-700">{label}</div>
+              <div className="mt-1 text-2xl font-black text-gray-900">{count}人</div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-sm leading-6 text-gray-600">
+          建議讓「穩定掌握型」學生擔任判準說明者；「表面線索依賴型」學生處理對比案例；
+          「鷹架依賴型」學生練習無提示判斷；「高信心錯誤或優先支持型」學生優先安排反例追問。
+        </p>
+      </div>
+    </Section>
+  )
+}
+
+
 export default function TeacherDecisionPage() {
   const [filters, setFilters] = useState<FiltersState>(INITIAL_FILTERS)
   const [data, setData] = useState<DashboardResponse | null>(null)
@@ -988,7 +1243,9 @@ export default function TeacherDecisionPage() {
               )}
             </Section>
 
-            <Section title="質性資料分析：學生如何說明分類判準" subtitle="從學生理由與排除理由中，辨識是否真的能用判準說明，而不只是選到答案。">
+                        <InstructionalPrescriptionSection data={data} qualitative={qualitative} />
+
+<Section title="質性資料分析：學生如何說明分類判準" subtitle="從學生理由與排除理由中，辨識是否真的能用判準說明，而不只是選到答案。">
               {qualitativeLoading ? (
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">質性資料讀取中…</div>
               ) : qualitativeError ? (
