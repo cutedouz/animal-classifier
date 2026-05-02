@@ -517,6 +517,14 @@ export default function AdminTeachersPage() {
               visibleCount={visibleCreateClasses.length}
               totalCount={data?.availableClasses.length ?? 0}
             />
+
+            <SelectedClassChips
+              title="新增教師已勾選的授權班級"
+              selectedKeys={selectedClassKeys}
+              classMap={classMap}
+              onRemove={(key) => setSelectedClassKeys((prev) => prev.filter((value) => value !== key))}
+            />
+
             <ScrollableClassPicker
               classes={visibleCreateClasses}
               selectedKeys={selectedClassKeys}
@@ -700,6 +708,18 @@ export default function AdminTeachersPage() {
                         totalCount={data?.availableClasses.length ?? 0}
                       />
 
+                      <SelectedClassChips
+                        title="目前已勾選的授權班級"
+                        selectedKeys={draft}
+                        classMap={classMap}
+                        onRemove={(key) => {
+                          setAssignmentDrafts((prev) => ({
+                            ...prev,
+                            [teacher.id]: (prev[teacher.id] ?? []).filter((value) => value !== key),
+                          }))
+                        }}
+                      />
+
                       <ScrollableClassPicker
                         classes={visibleTeacherClasses}
                         selectedKeys={draft}
@@ -826,6 +846,72 @@ function ClassFilterPanel({
           顯示 {visibleCount} / {totalCount} 個可授權班級
         </span>
       </div>
+    </div>
+  )
+}
+
+
+function classOptionFromKey(key: string, classMap: Map<string, ClassOption>): ClassOption {
+  const existing = classMap.get(key)
+  if (existing) return existing
+
+  const [schoolCode, grade, className] = key.split('::')
+  return {
+    schoolCode: schoolCode || 'unknown',
+    schoolName: schoolCode || 'unknown',
+    grade: grade || null,
+    className: className || 'unknown',
+  }
+}
+
+function SelectedClassChips({
+  title,
+  selectedKeys,
+  classMap,
+  onRemove,
+}: {
+  title: string
+  selectedKeys: string[]
+  classMap: Map<string, ClassOption>
+  onRemove: (key: string) => void
+}) {
+  return (
+    <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-bold text-blue-900">{title}</div>
+        <div className="text-xs text-blue-700">{selectedKeys.length} 個班級</div>
+      </div>
+
+      {selectedKeys.length > 0 ? (
+        <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto pr-1">
+          {selectedKeys.map((key) => {
+            const item = classOptionFromKey(key, classMap)
+            return (
+              <span
+                key={key}
+                className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-900"
+              >
+                <span>{labelClass(item)}</span>
+                <button
+                  type="button"
+                  onClick={() => onRemove(key)}
+                  className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-black text-blue-800 hover:bg-blue-200"
+                  aria-label={`移除 ${labelClass(item)}`}
+                  title="移除此授權班級"
+                >
+                  x
+                </button>
+              </span>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="text-sm text-blue-700">尚未勾選任何班級。</div>
+      )}
+
+      <p className="mt-2 text-xs leading-5 text-blue-700">
+        這裡會列出所有已勾選班級，不受下方搜尋或學校篩選影響。若要取消某班授權，請直接按該班級旁的 x。
+      </p>
     </div>
   )
 }
