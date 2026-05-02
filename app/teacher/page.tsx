@@ -1097,7 +1097,13 @@ export default function TeacherDecisionPage() {
               <div className="mt-1 text-xs leading-5 text-gray-500">管理名單、重新整理資料，或在共用電腦上登出。</div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <a href="/teacher/roster" className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">學生名單管理</a>
+                            <a
+                href="/teacher/account"
+                className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+              >
+                帳號設定
+              </a>
+<a href="/teacher/roster" className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">學生名單管理</a>
               <button type="button" onClick={() => window.location.reload()} className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">重新整理</button>
               <button type="button" onClick={handleTeacherLogout} className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">登出</button>
             </div>

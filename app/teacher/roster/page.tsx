@@ -198,6 +198,12 @@ export default function TeacherRosterPage() {
               >
                 重新讀取
               </button>
+              <a
+                href="/teacher/account"
+                className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+              >
+                帳號設定
+              </a>
               <button
                 type="button"
                 onClick={handleTeacherLogout}
