@@ -34,6 +34,12 @@ type ApiState = {
   availableClasses: ClassOption[]
 }
 
+type ClassFilterState = {
+  search: string
+  schoolCode: string
+  hideExperienceClasses: boolean
+}
+
 function classKey(item: ClassOption) {
   return `${item.schoolCode}::${item.grade ?? ''}::${item.className}`
 }
@@ -66,6 +72,12 @@ function isExperienceOrTestClass(item: ClassOption) {
   )
 }
 
+const DEFAULT_CLASS_FILTER: ClassFilterState = {
+  search: '',
+  schoolCode: '',
+  hideExperienceClasses: true,
+}
+
 export default function AdminTeachersPage() {
   const [adminPassword, setAdminPassword] = useState('')
   const [data, setData] = useState<ApiState | null>(null)
@@ -78,9 +90,12 @@ export default function AdminTeachersPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [selectedClassKeys, setSelectedClassKeys] = useState<string[]>([])
-  const [classSearch, setClassSearch] = useState('')
-  const [schoolFilter, setSchoolFilter] = useState('')
-  const [hideExperienceClasses, setHideExperienceClasses] = useState(true)
+  const [createClassFilter, setCreateClassFilter] = useState<ClassFilterState>(DEFAULT_CLASS_FILTER)
+
+  const [teacherSearch, setTeacherSearch] = useState('')
+  const [teacherStatusFilter, setTeacherStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [editingTeacherIds, setEditingTeacherIds] = useState<Record<string, boolean>>({})
+  const [teacherClassFilters, setTeacherClassFilters] = useState<Record<string, ClassFilterState>>({})
 
   const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({})
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string[]>>({})
@@ -103,16 +118,44 @@ export default function AdminTeachersPage() {
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'zh-Hant'))
   }, [data?.availableClasses])
 
-  const visibleAvailableClasses = useMemo(() => {
-    const keyword = classSearch.trim().toLowerCase()
+  const visibleCreateClasses = useMemo(() => {
+    return filterClassOptions(data?.availableClasses ?? [], createClassFilter)
+  }, [data?.availableClasses, createClassFilter])
 
-    return (data?.availableClasses ?? []).filter((item) => {
-      if (schoolFilter && item.schoolCode !== schoolFilter) return false
-      if (hideExperienceClasses && isExperienceOrTestClass(item)) return false
-      if (keyword && !classSearchText(item).includes(keyword)) return false
-      return true
+  const visibleTeachers = useMemo(() => {
+    const keyword = teacherSearch.trim().toLowerCase()
+
+    return (data?.teachers ?? []).filter((teacher) => {
+      if (teacherStatusFilter === 'active' && !teacher.isActive) return false
+      if (teacherStatusFilter === 'inactive' && teacher.isActive) return false
+
+      if (!keyword) return true
+
+      const activeAssignments = teacher.assignments
+        .filter((item) => item.is_active)
+        .map((item) =>
+          labelClass({
+            schoolCode: item.school_code,
+            schoolName: item.school_name,
+            grade: item.grade,
+            className: item.class_name,
+          })
+        )
+        .join(' ')
+
+      const text = [
+        teacher.username,
+        teacher.displayName,
+        teacher.email ?? '',
+        teacher.note ?? '',
+        activeAssignments,
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return text.includes(keyword)
     })
-  }, [data?.availableClasses, classSearch, schoolFilter, hideExperienceClasses])
+  }, [data?.teachers, teacherSearch, teacherStatusFilter])
 
   async function loadData() {
     if (!adminPassword) {
@@ -185,6 +228,58 @@ export default function AdminTeachersPage() {
         grade: item!.grade,
         className: item!.className,
       }))
+  }
+
+  function getTeacherClassFilter(teacherId: string): ClassFilterState {
+    return teacherClassFilters[teacherId] ?? DEFAULT_CLASS_FILTER
+  }
+
+  function setTeacherClassFilter(teacherId: string, next: ClassFilterState) {
+    setTeacherClassFilters((prev) => ({
+      ...prev,
+      [teacherId]: next,
+    }))
+  }
+
+  function openTeacherEdit(teacher: TeacherRow) {
+    setEditingTeacherIds((prev) => ({ ...prev, [teacher.id]: true }))
+    setAssignmentMessages((prev) => {
+      const next = { ...prev }
+      delete next[teacher.id]
+      return next
+    })
+
+    if (!teacherClassFilters[teacher.id]) {
+      const active = teacher.assignments.find((item) => item.is_active)
+      setTeacherClassFilters((prev) => ({
+        ...prev,
+        [teacher.id]: {
+          ...DEFAULT_CLASS_FILTER,
+          schoolCode: active?.school_code ?? '',
+        },
+      }))
+    }
+  }
+
+  function closeTeacherEdit(teacher: TeacherRow) {
+    const restored = teacher.assignments
+      .filter((assignment) => assignment.is_active)
+      .map((assignment) =>
+        classKey({
+          schoolCode: assignment.school_code,
+          schoolName: assignment.school_name,
+          grade: assignment.grade,
+          className: assignment.class_name,
+        })
+      )
+
+    setAssignmentDrafts((prev) => ({ ...prev, [teacher.id]: restored }))
+    setEditingTeacherIds((prev) => ({ ...prev, [teacher.id]: false }))
+    setAssignmentMessages((prev) => {
+      const next = { ...prev }
+      delete next[teacher.id]
+      return next
+    })
   }
 
   async function createTeacher() {
@@ -311,6 +406,7 @@ export default function AdminTeachersPage() {
           text: '已更新班級授權。教師重新整理教師頁或重新登入後即可套用最新權限。',
         },
       }))
+      setEditingTeacherIds((prev) => ({ ...prev, [teacherId]: false }))
       await loadData()
     } catch (err) {
       const text = err instanceof Error ? err.message : '更新班級授權失敗'
@@ -327,17 +423,29 @@ export default function AdminTeachersPage() {
     }
   }
 
-
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
         <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h1 className="text-3xl font-black tracking-tight text-gray-900">
-            教師帳號管理
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-gray-600">
-            此頁用於建立教師帳號、重設密碼與設定可查看班級。資料權限仍由後端 API 檢查，不只靠前端篩選。
-          </p>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-black tracking-tight text-gray-900">
+                教師帳號管理
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                此頁用於建立教師帳號、重設密碼與設定可查看班級。資料權限仍由後端 API 檢查，不只靠前端篩選。
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <a href="/admin" className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">
+                管理中心
+              </a>
+              <a href="/teacher/account" className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">
+                教師帳號設定頁
+              </a>
+            </div>
+          </div>
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row">
             <input
@@ -403,36 +511,18 @@ export default function AdminTeachersPage() {
           <div className="mt-5">
             <div className="mb-2 text-sm font-bold text-gray-700">授權班級</div>
             <ClassFilterPanel
-              classSearch={classSearch}
-              setClassSearch={setClassSearch}
-              schoolFilter={schoolFilter}
-              setSchoolFilter={setSchoolFilter}
-              hideExperienceClasses={hideExperienceClasses}
-              setHideExperienceClasses={setHideExperienceClasses}
+              filter={createClassFilter}
+              setFilter={setCreateClassFilter}
               availableSchoolOptions={availableSchoolOptions}
-              visibleCount={visibleAvailableClasses.length}
+              visibleCount={visibleCreateClasses.length}
               totalCount={data?.availableClasses.length ?? 0}
             />
-            <div className="mt-3 grid max-h-64 gap-2 overflow-auto rounded-xl border border-gray-200 p-3 md:grid-cols-2 lg:grid-cols-3">
-              {visibleAvailableClasses.map((item) => {
-                const key = classKey(item)
-                return (
-                  <label key={key} className="flex items-start gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={selectedClassKeys.includes(key)}
-                      onChange={() => toggleClass(key)}
-                      className="mt-1"
-                    />
-                    <span>{labelClass(item)}</span>
-                  </label>
-                )
-              })}
-
-              {data && visibleAvailableClasses.length === 0 ? (
-                <div className="text-sm text-gray-500">目前沒有符合篩選條件的可授權班級。可嘗試清除搜尋、改選學校，或取消隱藏測試／體驗班級。</div>
-              ) : null}
-            </div>
+            <ScrollableClassPicker
+              classes={visibleCreateClasses}
+              selectedKeys={selectedClassKeys}
+              onToggle={(key) => toggleClass(key)}
+              emptyText="目前沒有符合篩選條件的可授權班級。"
+            />
           </div>
 
           <button
@@ -445,36 +535,60 @@ export default function AdminTeachersPage() {
         </section>
 
         <section className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h2 className="text-2xl font-black text-gray-900">現有教師</h2>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-2xl font-black text-gray-900">現有教師</h2>
+              <p className="mt-1 text-sm leading-6 text-gray-600">
+                預設只顯示各教師目前已授權班級。需要調整時，按「修改授權」再展開班級選擇器。
+              </p>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto] lg:min-w-[520px]">
+              <input
+                value={teacherSearch}
+                onChange={(event) => setTeacherSearch(event.target.value)}
+                placeholder="搜尋教師、帳號、Email 或已授權班級"
+                className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+              />
+              <select
+                value={teacherStatusFilter}
+                onChange={(event) => setTeacherStatusFilter(event.target.value as 'all' | 'active' | 'inactive')}
+                className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="all">全部狀態</option>
+                <option value="active">只看啟用</option>
+                <option value="inactive">只看停用</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600">
+            顯示 {visibleTeachers.length} / {data?.teachers.length ?? 0} 位教師
+          </div>
 
           <div className="mt-4 space-y-4">
-            {(data?.teachers ?? []).map((teacher) => {
+            {visibleTeachers.map((teacher) => {
               const draft = assignmentDrafts[teacher.id] ?? []
+              const activeAssignments = teacher.assignments.filter((item) => item.is_active)
+              const isEditing = editingTeacherIds[teacher.id] === true
+              const teacherFilter = getTeacherClassFilter(teacher.id)
+              const visibleTeacherClasses = filterClassOptions(data?.availableClasses ?? [], teacherFilter)
+              const inlineMessage = assignmentMessages[teacher.id]
+
               return (
                 <div key={teacher.id} className="rounded-2xl border border-gray-200 p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
-                      <div className="text-lg font-black text-gray-900">
-                        {teacher.displayName}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-lg font-black text-gray-900">
+                          {teacher.displayName}
+                        </div>
+                        <span className={`rounded-full px-2 py-1 text-xs font-bold ${teacher.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {teacher.isActive ? '啟用' : '停用'}
+                        </span>
                       </div>
                       <div className="text-sm text-gray-600">
-                        帳號：{teacher.username}｜狀態：{teacher.isActive ? '啟用' : '停用'}
-                      </div>
-                      <div className="mt-1 text-xs text-gray-500">
-                        已授權班級：
-                        {teacher.assignments.filter((item) => item.is_active).length > 0
-                          ? teacher.assignments
-                              .filter((item) => item.is_active)
-                              .map((item) =>
-                                labelClass({
-                                  schoolCode: item.school_code,
-                                  schoolName: item.school_name,
-                                  grade: item.grade,
-                                  className: item.class_name,
-                                })
-                              )
-                              .join('、')
-                          : '尚未授權'}
+                        帳號：{teacher.username}｜Email：{teacher.email ?? '—'}
                       </div>
                     </div>
 
@@ -486,8 +600,69 @@ export default function AdminTeachersPage() {
                       >
                         {teacher.isActive ? '停用' : '啟用'}
                       </button>
+
+                      {isEditing ? (
+                        <button
+                          type="button"
+                          onClick={() => closeTeacherEdit(teacher)}
+                          className="rounded-xl border border-gray-300 px-3 py-2 text-sm font-semibold"
+                        >
+                          取消修改
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openTeacherEdit(teacher)}
+                          className="rounded-xl bg-black px-3 py-2 text-sm font-semibold text-white"
+                        >
+                          修改授權
+                        </button>
+                      )}
                     </div>
                   </div>
+
+                  <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-bold text-gray-700">
+                        目前授權班級
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {activeAssignments.length} 個班級
+                      </div>
+                    </div>
+
+                    {activeAssignments.length > 0 ? (
+                      <div className="flex max-h-28 flex-wrap gap-2 overflow-y-auto pr-1">
+                        {activeAssignments.map((item) => (
+                          <span
+                            key={`${teacher.id}-${item.school_code}-${item.grade ?? ''}-${item.class_name}`}
+                            className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700"
+                          >
+                            {labelClass({
+                              schoolCode: item.school_code,
+                              schoolName: item.school_name,
+                              grade: item.grade,
+                              className: item.class_name,
+                            })}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-500">尚未授權任何班級。</div>
+                    )}
+                  </div>
+
+                  {inlineMessage ? (
+                    <div
+                      className={`mt-3 rounded-xl border px-3 py-2 text-sm ${
+                        inlineMessage.type === 'success'
+                          ? 'border-green-200 bg-green-50 text-green-700'
+                          : 'border-red-200 bg-red-50 text-red-700'
+                      }`}
+                    >
+                      {inlineMessage.text}
+                    </div>
+                  ) : null}
 
                   <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
                     <input
@@ -511,64 +686,62 @@ export default function AdminTeachersPage() {
                     </button>
                   </div>
 
-                  <div className="mt-5">
-                    <div className="mb-2 text-sm font-bold text-gray-700">調整授權班級</div>
-                    <div className="mb-2 rounded-xl bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-600">
-                      目前套用上方同一組搜尋與學校篩選。若找不到班級，請先清除搜尋或取消隱藏測試／體驗班級。
-                    </div>
-                    <div className="grid max-h-56 gap-2 overflow-auto rounded-xl border border-gray-200 p-3 md:grid-cols-2 lg:grid-cols-3">
-                      {visibleAvailableClasses.map((item) => {
-                        const key = classKey(item)
-                        return (
-                          <label key={`${teacher.id}-${key}`} className="flex items-start gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={draft.includes(key)}
-                              onChange={() => {
-                                const next = draft.includes(key)
-                                  ? draft.filter((value) => value !== key)
-                                  : [...draft, key]
-
-                                setAssignmentDrafts((prev) => ({
-                                  ...prev,
-                                  [teacher.id]: next,
-                                }))
-                              }}
-                              className="mt-1"
-                            />
-                            <span>{labelClass(item)}</span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                    {assignmentMessages[teacher.id] ? (
-                      <div
-                        className={`mt-3 rounded-xl border px-3 py-2 text-sm ${
-                          assignmentMessages[teacher.id].type === 'success'
-                            ? 'border-green-200 bg-green-50 text-green-700'
-                            : 'border-red-200 bg-red-50 text-red-700'
-                        }`}
-                      >
-                        {assignmentMessages[teacher.id].text}
+                  {isEditing ? (
+                    <div className="mt-5 rounded-2xl border border-gray-200 bg-white p-3">
+                      <div className="mb-2 text-sm font-bold text-gray-700">
+                        調整授權班級
                       </div>
-                    ) : null}
 
-                    <button
-                      type="button"
-                      onClick={() => saveAssignments(teacher.id)}
-                      disabled={assignmentSavingId === teacher.id}
-                      className="mt-3 rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
-                    >
-                      {assignmentSavingId === teacher.id ? '儲存中…' : '儲存班級授權'}
-                    </button>
-                  </div>
+                      <ClassFilterPanel
+                        filter={teacherFilter}
+                        setFilter={(next) => setTeacherClassFilter(teacher.id, next)}
+                        availableSchoolOptions={availableSchoolOptions}
+                        visibleCount={visibleTeacherClasses.length}
+                        totalCount={data?.availableClasses.length ?? 0}
+                      />
+
+                      <ScrollableClassPicker
+                        classes={visibleTeacherClasses}
+                        selectedKeys={draft}
+                        onToggle={(key) => {
+                          const next = draft.includes(key)
+                            ? draft.filter((value) => value !== key)
+                            : [...draft, key]
+
+                          setAssignmentDrafts((prev) => ({
+                            ...prev,
+                            [teacher.id]: next,
+                          }))
+                        }}
+                        emptyText="目前沒有符合篩選條件的可授權班級。"
+                      />
+
+                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => closeTeacherEdit(teacher)}
+                          className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveAssignments(teacher.id)}
+                          disabled={assignmentSavingId === teacher.id}
+                          className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+                        >
+                          {assignmentSavingId === teacher.id ? '儲存中…' : '儲存班級授權'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )
             })}
 
-            {data && data.teachers.length === 0 ? (
+            {data && visibleTeachers.length === 0 ? (
               <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">
-                目前尚無教師帳號。
+                目前沒有符合篩選條件的教師帳號。
               </div>
             ) : null}
           </div>
@@ -578,24 +751,26 @@ export default function AdminTeachersPage() {
   )
 }
 
+function filterClassOptions(classes: ClassOption[], filter: ClassFilterState) {
+  const keyword = filter.search.trim().toLowerCase()
+
+  return classes.filter((item) => {
+    if (filter.schoolCode && item.schoolCode !== filter.schoolCode) return false
+    if (filter.hideExperienceClasses && isExperienceOrTestClass(item)) return false
+    if (keyword && !classSearchText(item).includes(keyword)) return false
+    return true
+  })
+}
 
 function ClassFilterPanel({
-  classSearch,
-  setClassSearch,
-  schoolFilter,
-  setSchoolFilter,
-  hideExperienceClasses,
-  setHideExperienceClasses,
+  filter,
+  setFilter,
   availableSchoolOptions,
   visibleCount,
   totalCount,
 }: {
-  classSearch: string
-  setClassSearch: (value: string) => void
-  schoolFilter: string
-  setSchoolFilter: (value: string) => void
-  hideExperienceClasses: boolean
-  setHideExperienceClasses: (value: boolean) => void
+  filter: ClassFilterState
+  setFilter: (value: ClassFilterState) => void
   availableSchoolOptions: Array<[string, string]>
   visibleCount: number
   totalCount: number
@@ -604,15 +779,15 @@ function ClassFilterPanel({
     <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
       <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_auto]">
         <input
-          value={classSearch}
-          onChange={(event) => setClassSearch(event.target.value)}
+          value={filter.search}
+          onChange={(event) => setFilter({ ...filter, search: event.target.value })}
           placeholder="搜尋學校、年級、班級，例如：南新、708、701"
           className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
         />
 
         <select
-          value={schoolFilter}
-          onChange={(event) => setSchoolFilter(event.target.value)}
+          value={filter.schoolCode}
+          onChange={(event) => setFilter({ ...filter, schoolCode: event.target.value })}
           className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
         >
           <option value="">全部學校</option>
@@ -625,11 +800,7 @@ function ClassFilterPanel({
 
         <button
           type="button"
-          onClick={() => {
-            setClassSearch('')
-            setSchoolFilter('')
-            setHideExperienceClasses(true)
-          }}
+          onClick={() => setFilter(DEFAULT_CLASS_FILTER)}
           className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700"
         >
           清除篩選
@@ -640,8 +811,13 @@ function ClassFilterPanel({
         <label className="inline-flex items-center gap-2">
           <input
             type="checkbox"
-            checked={hideExperienceClasses}
-            onChange={(event) => setHideExperienceClasses(event.target.checked)}
+            checked={filter.hideExperienceClasses}
+            onChange={(event) =>
+              setFilter({
+                ...filter,
+                hideExperienceClasses: event.target.checked,
+              })
+            }
           />
           隱藏 demo／manual／測試／體驗班級
         </label>
@@ -654,3 +830,39 @@ function ClassFilterPanel({
   )
 }
 
+function ScrollableClassPicker({
+  classes,
+  selectedKeys,
+  onToggle,
+  emptyText,
+}: {
+  classes: ClassOption[]
+  selectedKeys: string[]
+  onToggle: (key: string) => void
+  emptyText: string
+}) {
+  return (
+    <div className="mt-3 h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white p-3">
+      <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+        {classes.map((item) => {
+          const key = classKey(item)
+          return (
+            <label key={key} className="flex items-start gap-2 rounded-lg px-2 py-1 text-sm hover:bg-gray-50">
+              <input
+                type="checkbox"
+                checked={selectedKeys.includes(key)}
+                onChange={() => onToggle(key)}
+                className="mt-1"
+              />
+              <span>{labelClass(item)}</span>
+            </label>
+          )
+        })}
+
+        {classes.length === 0 ? (
+          <div className="col-span-full text-sm text-gray-500">{emptyText}</div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
