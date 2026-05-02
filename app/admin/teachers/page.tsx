@@ -42,6 +42,30 @@ function labelClass(item: ClassOption) {
   return `${item.schoolName ?? item.schoolCode} ${item.grade ? `${item.grade}年級 ` : ''}${item.className}班`
 }
 
+function classSearchText(item: ClassOption) {
+  return [
+    item.schoolCode,
+    item.schoolName ?? '',
+    item.grade ?? '',
+    item.className,
+    labelClass(item),
+  ]
+    .join(' ')
+    .toLowerCase()
+}
+
+function isExperienceOrTestClass(item: ClassOption) {
+  const text = classSearchText(item)
+  return (
+    text.includes('manual:') ||
+    text.includes('demo') ||
+    text.includes('test') ||
+    text.includes('測試') ||
+    text.includes('體驗') ||
+    text.includes('上線測試')
+  )
+}
+
 export default function AdminTeachersPage() {
   const [adminPassword, setAdminPassword] = useState('')
   const [data, setData] = useState<ApiState | null>(null)
@@ -54,9 +78,14 @@ export default function AdminTeachersPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [selectedClassKeys, setSelectedClassKeys] = useState<string[]>([])
+  const [classSearch, setClassSearch] = useState('')
+  const [schoolFilter, setSchoolFilter] = useState('')
+  const [hideExperienceClasses, setHideExperienceClasses] = useState(true)
 
   const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({})
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string[]>>({})
+  const [assignmentSavingId, setAssignmentSavingId] = useState('')
+  const [assignmentMessages, setAssignmentMessages] = useState<Record<string, { type: 'success' | 'error'; text: string }>>({})
 
   const classMap = useMemo(() => {
     const map = new Map<string, ClassOption>()
@@ -65,6 +94,25 @@ export default function AdminTeachersPage() {
     }
     return map
   }, [data?.availableClasses])
+
+  const availableSchoolOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const item of data?.availableClasses ?? []) {
+      map.set(item.schoolCode, item.schoolName ?? item.schoolCode)
+    }
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'zh-Hant'))
+  }, [data?.availableClasses])
+
+  const visibleAvailableClasses = useMemo(() => {
+    const keyword = classSearch.trim().toLowerCase()
+
+    return (data?.availableClasses ?? []).filter((item) => {
+      if (schoolFilter && item.schoolCode !== schoolFilter) return false
+      if (hideExperienceClasses && isExperienceOrTestClass(item)) return false
+      if (keyword && !classSearchText(item).includes(keyword)) return false
+      return true
+    })
+  }, [data?.availableClasses, classSearch, schoolFilter, hideExperienceClasses])
 
   async function loadData() {
     if (!adminPassword) {
@@ -233,6 +281,12 @@ export default function AdminTeachersPage() {
   async function saveAssignments(teacherId: string) {
     setError('')
     setMessage('')
+    setAssignmentSavingId(teacherId)
+    setAssignmentMessages((prev) => {
+      const next = { ...prev }
+      delete next[teacherId]
+      return next
+    })
 
     try {
       const response = await fetch('/api/admin/teachers', {
@@ -250,11 +304,29 @@ export default function AdminTeachersPage() {
       if (!response.ok) throw new Error(result?.error || '更新班級授權失敗')
 
       setMessage('已更新班級授權。')
+      setAssignmentMessages((prev) => ({
+        ...prev,
+        [teacherId]: {
+          type: 'success',
+          text: '已更新班級授權。教師重新整理教師頁或重新登入後即可套用最新權限。',
+        },
+      }))
       await loadData()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新班級授權失敗')
+      const text = err instanceof Error ? err.message : '更新班級授權失敗'
+      setError(text)
+      setAssignmentMessages((prev) => ({
+        ...prev,
+        [teacherId]: {
+          type: 'error',
+          text,
+        },
+      }))
+    } finally {
+      setAssignmentSavingId('')
     }
   }
+
 
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6 lg:px-8">
@@ -330,8 +402,19 @@ export default function AdminTeachersPage() {
 
           <div className="mt-5">
             <div className="mb-2 text-sm font-bold text-gray-700">授權班級</div>
-            <div className="grid max-h-64 gap-2 overflow-auto rounded-xl border border-gray-200 p-3 md:grid-cols-2 lg:grid-cols-3">
-              {(data?.availableClasses ?? []).map((item) => {
+            <ClassFilterPanel
+              classSearch={classSearch}
+              setClassSearch={setClassSearch}
+              schoolFilter={schoolFilter}
+              setSchoolFilter={setSchoolFilter}
+              hideExperienceClasses={hideExperienceClasses}
+              setHideExperienceClasses={setHideExperienceClasses}
+              availableSchoolOptions={availableSchoolOptions}
+              visibleCount={visibleAvailableClasses.length}
+              totalCount={data?.availableClasses.length ?? 0}
+            />
+            <div className="mt-3 grid max-h-64 gap-2 overflow-auto rounded-xl border border-gray-200 p-3 md:grid-cols-2 lg:grid-cols-3">
+              {visibleAvailableClasses.map((item) => {
                 const key = classKey(item)
                 return (
                   <label key={key} className="flex items-start gap-2 text-sm">
@@ -346,8 +429,8 @@ export default function AdminTeachersPage() {
                 )
               })}
 
-              {data && data.availableClasses.length === 0 ? (
-                <div className="text-sm text-gray-500">目前沒有可授權的班級資料。</div>
+              {data && visibleAvailableClasses.length === 0 ? (
+                <div className="text-sm text-gray-500">目前沒有符合篩選條件的可授權班級。可嘗試清除搜尋、改選學校，或取消隱藏測試／體驗班級。</div>
               ) : null}
             </div>
           </div>
@@ -430,8 +513,11 @@ export default function AdminTeachersPage() {
 
                   <div className="mt-5">
                     <div className="mb-2 text-sm font-bold text-gray-700">調整授權班級</div>
+                    <div className="mb-2 rounded-xl bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-600">
+                      目前套用上方同一組搜尋與學校篩選。若找不到班級，請先清除搜尋或取消隱藏測試／體驗班級。
+                    </div>
                     <div className="grid max-h-56 gap-2 overflow-auto rounded-xl border border-gray-200 p-3 md:grid-cols-2 lg:grid-cols-3">
-                      {(data?.availableClasses ?? []).map((item) => {
+                      {visibleAvailableClasses.map((item) => {
                         const key = classKey(item)
                         return (
                           <label key={`${teacher.id}-${key}`} className="flex items-start gap-2 text-sm">
@@ -455,12 +541,25 @@ export default function AdminTeachersPage() {
                         )
                       })}
                     </div>
+                    {assignmentMessages[teacher.id] ? (
+                      <div
+                        className={`mt-3 rounded-xl border px-3 py-2 text-sm ${
+                          assignmentMessages[teacher.id].type === 'success'
+                            ? 'border-green-200 bg-green-50 text-green-700'
+                            : 'border-red-200 bg-red-50 text-red-700'
+                        }`}
+                      >
+                        {assignmentMessages[teacher.id].text}
+                      </div>
+                    ) : null}
+
                     <button
                       type="button"
                       onClick={() => saveAssignments(teacher.id)}
-                      className="mt-3 rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
+                      disabled={assignmentSavingId === teacher.id}
+                      className="mt-3 rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
                     >
-                      儲存班級授權
+                      {assignmentSavingId === teacher.id ? '儲存中…' : '儲存班級授權'}
                     </button>
                   </div>
                 </div>
@@ -478,3 +577,80 @@ export default function AdminTeachersPage() {
     </main>
   )
 }
+
+
+function ClassFilterPanel({
+  classSearch,
+  setClassSearch,
+  schoolFilter,
+  setSchoolFilter,
+  hideExperienceClasses,
+  setHideExperienceClasses,
+  availableSchoolOptions,
+  visibleCount,
+  totalCount,
+}: {
+  classSearch: string
+  setClassSearch: (value: string) => void
+  schoolFilter: string
+  setSchoolFilter: (value: string) => void
+  hideExperienceClasses: boolean
+  setHideExperienceClasses: (value: boolean) => void
+  availableSchoolOptions: Array<[string, string]>
+  visibleCount: number
+  totalCount: number
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+      <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_auto]">
+        <input
+          value={classSearch}
+          onChange={(event) => setClassSearch(event.target.value)}
+          placeholder="搜尋學校、年級、班級，例如：南新、708、701"
+          className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
+        />
+
+        <select
+          value={schoolFilter}
+          onChange={(event) => setSchoolFilter(event.target.value)}
+          className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
+        >
+          <option value="">全部學校</option>
+          {availableSchoolOptions.map(([schoolCode, schoolName]) => (
+            <option key={schoolCode} value={schoolCode}>
+              {schoolName}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={() => {
+            setClassSearch('')
+            setSchoolFilter('')
+            setHideExperienceClasses(true)
+          }}
+          className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700"
+        >
+          清除篩選
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs leading-5 text-gray-600">
+        <label className="inline-flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={hideExperienceClasses}
+            onChange={(event) => setHideExperienceClasses(event.target.checked)}
+          />
+          隱藏 demo／manual／測試／體驗班級
+        </label>
+
+        <span>
+          顯示 {visibleCount} / {totalCount} 個可授權班級
+        </span>
+      </div>
+    </div>
+  )
+}
+
