@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { hashTeacherPassword } from '../../../../lib/teacherAuth'
+import { sendTeacherApprovedEmail } from '../../../../lib/email'
 
 export const dynamic = 'force-dynamic'
 
@@ -90,7 +91,7 @@ async function ensureSchoolDirectory(admin: any, input: {
 async function createTeacherFromApplication(admin: any, body: any) {
   const applicationId = clean(body.id)
   const reviewNote = clean(body.reviewNote)
-  const password = typeof body.password === 'string' ? body.password : ''
+  const submittedPassword = typeof body.password === 'string' ? body.password.trim() : ''
   const usernameOverride = normalizeUsername(body.username)
   const displayNameOverride = clean(body.displayName)
   const schoolCodeOverride = clean(body.schoolCode)
@@ -101,10 +102,6 @@ async function createTeacherFromApplication(admin: any, body: any) {
 
   if (!applicationId) {
     return NextResponse.json({ error: '缺少申請 ID。' }, { status: 400 })
-  }
-
-  if (password.length < 6) {
-    return NextResponse.json({ error: '初始密碼至少需 6 個字元。' }, { status: 400 })
   }
 
   const { data: application, error: appError } = await admin
@@ -126,6 +123,7 @@ async function createTeacherFromApplication(admin: any, body: any) {
   }
 
   const username = usernameOverride || normalizeUsername(application.requested_username)
+  const initialPassword = submittedPassword || username
   const displayName = displayNameOverride || clean(application.teacher_name)
   const email = clean(application.email).toLowerCase()
   const schoolName = schoolNameOverride || clean(application.school_name)
@@ -176,7 +174,7 @@ async function createTeacherFromApplication(admin: any, body: any) {
       username,
       email: email || null,
       display_name: displayName,
-      password_hash: hashTeacherPassword(password),
+      password_hash: hashTeacherPassword(initialPassword),
       is_active: true,
       is_super_admin: isSuperAdmin,
       note: `由教師申請核准建立。application_id=${applicationId}`,
@@ -213,6 +211,7 @@ async function createTeacherFromApplication(admin: any, body: any) {
   const combinedReviewNote = [
     reviewNote,
     `已建立教師帳號：${username}`,
+    `初始密碼：同教師帳號`,
     isSuperAdmin ? '權限：super teacher' : `授權班級：${parsedClasses.join('、')}`,
   ]
     .filter(Boolean)
@@ -237,11 +236,46 @@ async function createTeacherFromApplication(admin: any, body: any) {
 
   if (updateError) throw new Error(updateError.message)
 
+  const emailResult = await sendTeacherApprovedEmail({
+    to: email,
+    teacherName: displayName,
+    username,
+    initialPassword,
+    schoolName,
+    classNames: parsedClasses,
+  })
+
+  const emailUpdate = emailResult.sent
+    ? {
+        approved_email_sent_at: new Date().toISOString(),
+        approved_email_message_id: emailResult.id,
+        approved_email_error: null,
+      }
+    : {
+        approved_email_error: emailResult.error ?? 'email not sent',
+      }
+
+  const { data: finalApplication, error: emailUpdateError } = await admin
+    .from('teacher_applications')
+    .update({
+      ...emailUpdate,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', applicationId)
+    .select('*')
+    .single()
+
+  if (emailUpdateError) {
+    console.error('teacher application email status update error:', emailUpdateError.message)
+  }
+
   return NextResponse.json({
     ok: true,
     teacher,
-    application: updatedApplication,
+    application: finalApplication ?? updatedApplication,
     createdAssignments: isSuperAdmin ? [] : parsedClasses,
+    email: emailResult,
+    initialPasswordPolicy: 'same_as_username',
   })
 }
 

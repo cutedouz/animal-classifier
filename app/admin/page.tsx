@@ -120,7 +120,7 @@ export default function AdminCenterPage() {
       schoolName: app.school_name || '',
       county: app.county || '',
       classNames: classText(app.class_names),
-      password: '',
+      password: normalizeUsername(app.requested_username ?? ''),
       isSuperAdmin: false,
     }
   }
@@ -212,12 +212,6 @@ export default function AdminCenterPage() {
       return
     }
 
-    if (!form.password || form.password.length < 6) {
-      setError('初始密碼至少需 6 個字元。')
-      setActionLoadingId('')
-      return
-    }
-
     if (!form.schoolCode || !form.schoolName) {
       setError('請確認 school_code 與學校名稱。')
       setActionLoadingId('')
@@ -246,7 +240,7 @@ export default function AdminCenterPage() {
           schoolName: form.schoolName,
           county: form.county,
           classNames: form.classNames,
-          password: form.password,
+          password: form.password || form.username,
           isSuperAdmin: form.isSuperAdmin,
           reviewNote: reviewNote[app.id] ?? '',
         }),
@@ -255,7 +249,10 @@ export default function AdminCenterPage() {
       const result = await response.json()
       if (!response.ok) throw new Error(result?.error || '建立教師帳號失敗。')
 
-      setMessage(`已建立教師帳號：${result.teacher?.username ?? form.username}。教師可登入 /teacher，並至 /teacher/roster 上傳學生名單。`)
+      const emailText = result.email?.sent
+        ? 'Email 通知已寄出。'
+        : `Email 未寄出：${result.email?.error ?? '原因不明'}。`
+      setMessage(`已建立教師帳號：${result.teacher?.username ?? form.username}。初始密碼預設同教師帳號。${emailText} 教師可登入 /teacher，並至 /teacher/roster 上傳學生名單。`)
       await loadAll()
     } catch (err) {
       setError(err instanceof Error ? err.message : '建立教師帳號失敗。')
@@ -272,7 +269,7 @@ export default function AdminCenterPage() {
             <div>
               <h1 className="text-4xl font-black tracking-tight text-[#234a2c]">Sci-Flipper 管理中心</h1>
               <p className="mt-3 text-sm leading-6 text-[#667266]">
-                v1-b 支援核准後自動建立教師帳號、學校資料與班級授權。email 通知會在下一版加入。
+                支援核准後自動建立教師帳號、學校資料與班級授權，並寄出 Email 通知。初始密碼預設與教師帳號相同。
               </p>
             </div>
 
@@ -398,7 +395,7 @@ export default function AdminCenterPage() {
                     <div className="mt-4 rounded-2xl border border-[#dfe8df] bg-[#fbfdfb] p-4">
                       <h4 className="text-base font-black text-[#234a2c]">核准並建立帳號</h4>
                       <p className="mt-1 text-xs leading-5 text-[#667266]">
-                        請先確認 school_code、授權班級與初始密碼。建立後教師即可登入 /teacher，並可至 /teacher/roster 匯入學生名單。
+                        請先確認 school_code 與授權班級。初始密碼預設與教師帳號相同；建立後系統會寄 Email，提供教師登入頁與學生名單上傳頁。
                       </p>
 
                       <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -407,7 +404,7 @@ export default function AdminCenterPage() {
                         <Field label="school_code" value={form.schoolCode} onChange={(v) => updateApproveForm(app, { schoolCode: v })} />
                         <Field label="學校名稱" value={form.schoolName} onChange={(v) => updateApproveForm(app, { schoolName: v })} />
                         <Field label="縣市" value={form.county} onChange={(v) => updateApproveForm(app, { county: v })} />
-                        <Field label="初始密碼" type="password" value={form.password} onChange={(v) => updateApproveForm(app, { password: v })} />
+                        <Field label="初始密碼（預設同教師帳號）" type="password" value={form.password} onChange={(v) => updateApproveForm(app, { password: v })} />
                         <label className="block md:col-span-2">
                           <span className="text-sm font-bold text-[#425142]">授權班級</span>
                           <textarea
@@ -440,7 +437,7 @@ export default function AdminCenterPage() {
                         onChange={(e) => setReviewNote((prev) => ({ ...prev, [app.id]: e.target.value }))}
                         rows={2}
                         className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                        placeholder="例如：已核准建立帳號；密碼另行通知。"
+                        placeholder="例如：已核准建立帳號；系統已寄出教師登入與學生名單上傳連結。"
                       />
                     </div>
 
