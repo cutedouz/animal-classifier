@@ -241,7 +241,7 @@ export default function AdminCenterPage() {
           county: form.county,
           classNames: form.classNames,
           password: form.password || form.username,
-          isSuperAdmin: form.isSuperAdmin,
+          isSuperAdmin: false,
           reviewNote: reviewNote[app.id] ?? '',
         }),
       })
@@ -415,18 +415,9 @@ export default function AdminCenterPage() {
                             placeholder={'每行一個班級，例如：\n701\n702'}
                           />
                         </label>
-
-                        <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900 md:col-span-2">
-                          <input
-                            type="checkbox"
-                            checked={form.isSuperAdmin}
-                            onChange={(e) => updateApproveForm(app, { isSuperAdmin: e.target.checked })}
-                            className="mt-1"
-                          />
-                          <span>
-                            設為 super teacher。此帳號可查看所有學校與班級，一般教師請不要勾選。
-                          </span>
-                        </label>
+                        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm leading-6 text-blue-900 md:col-span-2">
+                          此流程一律建立一般教師帳號，只能查看授權班級。super teacher 權限不得由教師申請核准流程建立。
+                        </div>
                       </div>
                     </div>
 

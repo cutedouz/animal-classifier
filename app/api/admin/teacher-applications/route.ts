@@ -98,7 +98,8 @@ async function createTeacherFromApplication(admin: any, body: any) {
   const schoolNameOverride = clean(body.schoolName)
   const countyOverride = clean(body.county)
   const classNamesOverride = clean(body.classNames)
-  const isSuperAdmin = body.isSuperAdmin === true
+  // Security: teacher application approval must only create ordinary teacher accounts.
+  const isSuperAdmin = false
 
   if (!applicationId) {
     return NextResponse.json({ error: '缺少申請 ID。' }, { status: 400 })
@@ -176,7 +177,7 @@ async function createTeacherFromApplication(admin: any, body: any) {
       display_name: displayName,
       password_hash: hashTeacherPassword(initialPassword),
       is_active: true,
-      is_super_admin: isSuperAdmin,
+      is_super_admin: false,
       note: `由教師申請核准建立。application_id=${applicationId}`,
       updated_at: new Date().toISOString(),
     })
@@ -212,7 +213,7 @@ async function createTeacherFromApplication(admin: any, body: any) {
     reviewNote,
     `已建立教師帳號：${username}`,
     `初始密碼：同教師帳號`,
-    isSuperAdmin ? '權限：super teacher' : `授權班級：${parsedClasses.join('、')}`,
+    `授權班級：${parsedClasses.join('、')}`,
   ]
     .filter(Boolean)
     .join('\n')
@@ -273,7 +274,7 @@ async function createTeacherFromApplication(admin: any, body: any) {
     ok: true,
     teacher,
     application: finalApplication ?? updatedApplication,
-    createdAssignments: isSuperAdmin ? [] : parsedClasses,
+    createdAssignments: parsedClasses,
     email: emailResult,
     initialPasswordPolicy: 'same_as_username',
   })
