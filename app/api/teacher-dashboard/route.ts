@@ -610,6 +610,17 @@ function safeNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function payloadString(payload: JsonRecord | null, camelKey: string, snakeKey: string) {
+  return safeString(payload?.[camelKey]) ?? safeString(payload?.[snakeKey])
+}
+
+function isExcludedDashboardRecord(record: { payload: JsonRecord | null }) {
+  const dataUseScope = payloadString(record.payload, 'dataUseScope', 'data_use_scope')
+  const platformMode = payloadString(record.payload, 'platformMode', 'platform_mode')
+
+  return dataUseScope === 'excluded_test' || platformMode === 'dev_test'
+}
+
 function parsePayloadInfo(payload: JsonRecord | null) {
   const stage1 = toObject(payload?.stage1)
   const legacyAwareness = toObject(payload?.awareness)
@@ -730,13 +741,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: recordError.message }, { status: 500 })
     }
 
-    const recordRows = ((records ?? []) as LearningRecordRow[]).filter((record) =>
-      recordMatchesTeacherAssignments(record, teacherAuth.assignments, teacherAuth.isSuperAdmin)
-    )
+    const recordRows = ((records ?? []) as LearningRecordRow[])
+      .filter((record) =>
+        recordMatchesTeacherAssignments(record, teacherAuth.assignments, teacherAuth.isSuperAdmin)
+      )
+      .filter((record) => !isExcludedDashboardRecord(record))
     const allRecordIds = recordRows.map((record) => record.id)
 
     const [filterValuesResponse, itemLogsResponse, eventLogsResponse] = await Promise.all([
-      admin.from('learning_records').select('school_code, grade, class_name').range(0, 2999),
+      admin.from('learning_records').select('school_code, grade, class_name, payload').range(0, 2999),
       allRecordIds.length > 0
         ? admin
 // Use latest_learning_item_logs for teacher-facing diagnostics to avoid
@@ -1176,7 +1189,16 @@ for (const item of enrichedItems.filter((row) => row.is_correct === false)) {
       .sort((a, b) => (b.transferAccuracy ?? 0) - (a.transferAccuracy ?? 0))
       .slice(0, 10)
 
-    const filterRows = (filterValuesResponse.data ?? []).filter((row: any) => recordMatchesTeacherAssignments(row, teacherAuth.assignments)) as Array<{ school_code: string | null; grade: string | null; class_name: string | null }>
+    const filterRows = (
+      (filterValuesResponse.data ?? [])
+        .filter((row: any) => recordMatchesTeacherAssignments(row, teacherAuth.assignments))
+        .filter((row: any) => !isExcludedDashboardRecord(row))
+    ) as Array<{
+      school_code: string | null
+      grade: string | null
+      class_name: string | null
+      payload?: JsonRecord | null
+    }>
     const filters: FiltersResponse = {
   schoolCodes: unique(filterRows.map((row) => row.school_code).filter(Boolean) as string[]).sort(),
   grades: unique(filterRows.map((row) => row.grade).filter(Boolean) as string[]).sort(),
