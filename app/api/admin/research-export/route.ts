@@ -120,6 +120,66 @@ function bool01(value: unknown) {
   return ''
 }
 
+function hashStringToSeed(input: string) {
+  let hash = 2166136261
+
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return hash >>> 0
+}
+
+function buildResearchStudentHash(params: {
+  studentId?: unknown
+  participantCode?: unknown
+  schoolCode?: unknown
+  schoolYear?: unknown
+  semester?: unknown
+  grade?: unknown
+  className?: unknown
+  seatNo?: unknown
+}) {
+  const participantCode = clean(params.participantCode)
+  const sourceParts = [
+    'animal-classification-student-hash-v1',
+    clean(params.schoolCode),
+    clean(params.schoolYear),
+    clean(params.semester),
+    clean(params.grade),
+    clean(params.className),
+    clean(params.studentId) ?? participantCode,
+    clean(params.seatNo),
+  ].filter(Boolean)
+
+  if (sourceParts.length <= 1 || participantCode === 'anonymous') return null
+
+  const source = sourceParts.join('::')
+  const forwardHash = hashStringToSeed(source).toString(36).padStart(7, '0')
+  const reverseHash = hashStringToSeed([...source].reverse().join('')).toString(36).padStart(7, '0')
+
+  return `stu_${forwardHash}${reverseHash}`
+}
+
+function resolveStudentHash(record: LearningRecord | null | undefined) {
+  const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {}
+  return (
+    clean(payload.studentHash) ??
+    clean(payload.student_hash) ??
+    buildResearchStudentHash({
+      studentId: record?.student_id,
+      participantCode: record?.participant_code,
+      schoolCode: record?.school_code,
+      schoolYear: record?.school_year,
+      semester: record?.semester,
+      grade: record?.grade,
+      className: record?.class_name,
+      seatNo: record?.seat_no,
+    })
+  )
+}
+
 function csvValue(value: unknown) {
   if (value == null) return ''
   if (Array.isArray(value)) return csvValue(value.join('|'))
@@ -152,6 +212,7 @@ function normalizePayloadInfo(payload: any) {
   const p = payload && typeof payload === 'object' ? payload : {}
 
   return {
+    student_hash: clean(p.studentHash) ?? clean(p.student_hash) ?? null,
     platform_mode:
       clean(p.platformMode) ??
       clean(p.platform_mode) ??
@@ -317,6 +378,7 @@ async function buildItemLevelRows(admin: any, searchParams: URLSearchParams) {
 
       return {
         participant_code: item.participant_code,
+        student_hash: payloadInfo.student_hash ?? resolveStudentHash(record),
         record_id: item.record_id,
         student_id: record?.student_id ?? null,
         school_code: record?.school_code ?? null,
@@ -391,6 +453,7 @@ async function buildRecordStatusRows(admin: any, searchParams: URLSearchParams) 
       return {
         record_id: record.id,
         participant_code: record.participant_code,
+        student_hash: payloadInfo.student_hash ?? resolveStudentHash(record),
         student_id: record.student_id,
         school_code: record.school_code,
         school_year: record.school_year,
@@ -523,6 +586,7 @@ function buildStudentSummaryRows(itemRows: Array<Record<string, any>>) {
     return {
       record_id: recordId,
       participant_code: participantCode,
+      student_hash: first.student_hash,
       student_id: first.student_id,
       school_code: first.school_code,
       school_year: first.school_year,
@@ -668,6 +732,7 @@ function buildClassSummaryRows(studentRows: Array<Record<string, any>>) {
 
 const ITEM_HEADERS = [
   'participant_code',
+  'student_hash',
   'record_id',
   'student_id',
   'school_code',
@@ -727,6 +792,7 @@ const ITEM_HEADERS = [
 const STUDENT_HEADERS = [
   'record_id',
   'participant_code',
+  'student_hash',
   'student_id',
   'school_code',
   'school_year',
@@ -781,6 +847,7 @@ const CLASS_HEADERS = [
 const RECORD_STATUS_HEADERS = [
   'record_id',
   'participant_code',
+  'student_hash',
   'student_id',
   'school_code',
   'school_year',

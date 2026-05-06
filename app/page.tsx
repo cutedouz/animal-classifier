@@ -52,9 +52,8 @@ type EvidenceResponse = {
   answer: SixPhylum
 
   /**
-   * P0-1 暫時仍使用原本 UI 的 selectedFeatures。
-   * 目前先把 selectedFeatures[0] 當 primaryFeature。
-   * 下一輪再把 UI 改成「主要判準單選 + 次要判準複選」。
+   * 研究模式已採「主要判準 1 項 + 次要判準 0-2 項」。
+   * selectedFeatures 保留為衍生欄位，供舊版匯出與相容性使用。
    */
   selectedFeatures: string[]
   primaryFeature?: string
@@ -99,6 +98,7 @@ type LearnedBefore = 'yes' | 'no' | 'unsure'
 
 type EnterSession = {
   studentId?: string
+  studentHash?: string
   schoolCode: string
   schoolDisplayName?: string
   schoolYear: string
@@ -205,6 +205,33 @@ type LearningEventLog = {
   eventType: string
   eventValue?: Record<string, unknown> | null
   clientTs: string
+}
+
+type ResumeCandidate = {
+  source: 'local' | 'server'
+  progressSnapshot: any
+  currentStage?: string | null
+  updatedAt?: string | null
+  submissionKey?: string | null
+}
+
+type CompletedResumeNotice = {
+  currentStage?: string | null
+  updatedAt?: string | null
+  submissionKey?: string | null
+}
+
+type StudentResumeResult = {
+  found?: boolean
+  isCompleted?: boolean
+  currentStage?: string | null
+  submissionKey?: string | null
+  participantCode?: string | null
+  updatedAt?: string | null
+  payload?: any
+  progressSnapshot?: any
+  reason?: string
+  error?: string
 }
 
 const INITIAL_GROUPS: StageGroup[] = [
@@ -1035,6 +1062,61 @@ function buildParticipantSeedBase(session: EnterSession | null) {
   )
 }
 
+function buildResearchStudentHash(session: EnterSession | null, participantCode: string) {
+  if (session?.studentHash) return session.studentHash
+
+  const sourceParts = [
+    'animal-classification-student-hash-v1',
+    session?.schoolCode,
+    session?.schoolYear,
+    session?.semester,
+    session?.grade,
+    session?.className,
+    session?.studentId || participantCode,
+    session?.seatNo,
+  ].filter(Boolean)
+
+  if (sourceParts.length <= 1 || participantCode === 'anonymous') return null
+
+  const source = sourceParts.join('::')
+  const forwardHash = hashStringToSeed(source).toString(36).padStart(7, '0')
+  const reverseHash = hashStringToSeed([...source].reverse().join('')).toString(36).padStart(7, '0')
+
+  return `stu_${forwardHash}${reverseHash}`
+}
+
+function getResumeStageLabel(stage: unknown) {
+  const normalized = stage === 'awareness' ? 'reflection' : stage
+  const item = STAGE_ITEMS.find((entry) => entry.key === normalized)
+  return item ? `${item.stageLabel}：${item.teacherLabel}` : '尚未確認階段'
+}
+
+async function fetchServerProgress(session: EnterSession) {
+  const response = await fetch('/api/student-resume', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      studentId: session.studentId ?? null,
+      schoolCode: session.schoolCode ?? null,
+      schoolYear: session.schoolYear ?? null,
+      semester: session.semester ?? null,
+      grade: session.grade ?? null,
+      className: session.className ?? null,
+      seatNo: session.seatNo ?? null,
+    }),
+  })
+
+  const result = (await response.json()) as StudentResumeResult
+
+  if (!response.ok) {
+    throw new Error(result?.error || '恢復進度查詢失敗')
+  }
+
+  return result
+}
+
 function getCardName(cardId: string) {
   return stage1Cards.find((card) => card.id === cardId)?.name ?? cardId
 }
@@ -1817,6 +1899,9 @@ export default function Page() {
 
   const [selectedMovePayload, setSelectedMovePayload] = useState<DragPayload | null>(null)
   const [progressHydrated, setProgressHydrated] = useState(false)
+  const [resumeCandidate, setResumeCandidate] = useState<ResumeCandidate | null>(null)
+  const [completedResumeNotice, setCompletedResumeNotice] = useState<CompletedResumeNotice | null>(null)
+  const [serverSubmissionKey, setServerSubmissionKey] = useState<string | null>(null)
   const [readinessOptionMap, setReadinessOptionMap] = useState<Record<string, string[]>>({})
 
   const stage3EvidenceQuestions = useMemo(
@@ -1948,31 +2033,131 @@ export default function Page() {
       ? `${participantCode}:${enterSession.enteredAt}`
       : participantCode
 
+  const studentHash = useMemo(
+    () => buildResearchStudentHash(enterSession, participantCode),
+    [enterSession, participantCode]
+  )
+
+  const activeSubmissionKey = serverSubmissionKey ?? submissionKey
+
   const formalResearchMode = isFormalResearchSession(enterSession)
   const researchModeLabel = getResearchModeLabel(enterSession)
 
-  useEffect(() => {
-    if (!participantCode || participantCode === 'anonymous' || progressHydrated) return
+  const progressSnapshot = useMemo(
+    () => ({
+      participantCode,
+      submissionKey: activeSubmissionKey,
+      stage,
+      groups,
+      bankCardIds,
+      overallReason,
+      groupCreateCount,
+      cardMoveCount,
+      bridgeReflectAnswers,
+      diagnosticFeatures,
+      possibleFeatures,
+      customFeatureText,
+      readinessAnswers,
+      readinessAttemptCounts,
+      awarenessCommitment,
+      awarenessSecondsSpent,
+      evidenceResponses,
+      transferResponses,
+      evidenceItemLogs,
+      transferItemLogs,
+      eventLogs,
+      evidenceDraft: {
+        index: evidenceIndex,
+        answer: evidenceAnswer,
+        selectedFeatures: buildSelectedFeatures(
+          evidencePrimaryFeature,
+          evidenceSecondaryFeatures,
+          currentEvidenceFeatureOptions,
+          2
+        ),
+        primaryFeature: evidencePrimaryFeature,
+        secondaryFeatures: evidenceSecondaryFeatures,
+        reasonText: evidenceReasonText,
+        exclusionReasonText: evidenceExclusionReasonText,
+        confidence: evidenceConfidence,
+        familiarity: evidenceFamiliarity,
+        learnedBefore: evidenceLearnedBefore,
+      },
+      transferDraft: {
+        index: transferIndex,
+        answer: transferAnswer,
+        selectedFeatures: buildSelectedFeatures(
+          transferPrimaryFeature,
+          transferSecondaryFeatures,
+          currentTransferFeatureOptions,
+          2
+        ),
+        primaryFeature: transferPrimaryFeature,
+        secondaryFeatures: transferSecondaryFeatures,
+        reasonText: transferReasonText,
+        exclusionReasonText: transferExclusionReasonText,
+        confidence: transferConfidence,
+        familiarity: transferFamiliarity,
+        learnedBefore: transferLearnedBefore,
+      },
+      savedAt: new Date().toISOString(),
+    }),
+    [
+      participantCode,
+      activeSubmissionKey,
+      stage,
+      groups,
+      bankCardIds,
+      overallReason,
+      groupCreateCount,
+      cardMoveCount,
+      bridgeReflectAnswers,
+      diagnosticFeatures,
+      possibleFeatures,
+      customFeatureText,
+      readinessAnswers,
+      readinessAttemptCounts,
+      awarenessCommitment,
+      awarenessSecondsSpent,
+      evidenceResponses,
+      transferResponses,
+      evidenceItemLogs,
+      transferItemLogs,
+      eventLogs,
+      evidenceIndex,
+      evidenceAnswer,
+      evidencePrimaryFeature,
+      evidenceSecondaryFeatures,
+      evidenceReasonText,
+      evidenceExclusionReasonText,
+      evidenceConfidence,
+      evidenceFamiliarity,
+      evidenceLearnedBefore,
+      currentEvidenceFeatureOptions,
+      transferIndex,
+      transferAnswer,
+      transferPrimaryFeature,
+      transferSecondaryFeatures,
+      transferReasonText,
+      transferExclusionReasonText,
+      transferConfidence,
+      transferFamiliarity,
+      transferLearnedBefore,
+      currentTransferFeatureOptions,
+    ]
+  )
 
-    try {
-      const raw = localStorage.getItem(`animal-classifier-progress:${participantCode}`)
-      if (!raw) {
-        setProgressHydrated(true)
-        return
-      }
+  const restoreProgressSnapshot = useCallback(
+    (snapshot: any) => {
+      if (!snapshot) return
 
-      const saved = JSON.parse(raw)
-
-      if (saved?.participantCode !== participantCode) {
-        setProgressHydrated(true)
-        return
-      }
-
+      const saved = snapshot.progressSnapshot ?? snapshot
       const savedStageRaw = saved.stage ?? 'stage1'
-      const savedStage = (savedStageRaw === 'awareness' ? 'reflection' : savedStageRaw) as AppStage
+      const savedStage = (savedStageRaw === 'awareness'
+        ? 'reflection'
+        : savedStageRaw) as AppStage
       const savedEvidenceResponses: EvidenceResponse[] = saved.evidenceResponses ?? []
       const savedTransferResponses: EvidenceResponse[] = saved.transferResponses ?? []
-
       const savedEvidenceDraft = saved.evidenceDraft ?? null
       const savedTransferDraft = saved.transferDraft ?? null
 
@@ -2041,119 +2226,148 @@ export default function Page() {
         setTransferFamiliarity(savedTransferDraft?.familiarity ?? null)
         setTransferLearnedBefore(savedTransferDraft?.learnedBefore ?? 'unsure')
       }
+    },
+    [stage3EvidenceQuestions.length, transferQuestions.length]
+  )
 
-      setProgressHydrated(true)
-    } catch {
-      setProgressHydrated(true)
+  useEffect(() => {
+    if (
+      !enterSession ||
+      !participantCode ||
+      participantCode === 'anonymous' ||
+      progressHydrated ||
+      resumeCandidate ||
+      completedResumeNotice
+    ) {
+      return
     }
-  }, [participantCode, progressHydrated, stage3EvidenceQuestions.length])
+
+    const resumeSession = enterSession
+
+    let cancelled = false
+    async function hydrateProgress() {
+      try {
+        const raw = localStorage.getItem(`animal-classifier-progress:${participantCode}`)
+
+        if (raw) {
+          const saved = JSON.parse(raw)
+
+          if (saved?.participantCode === participantCode) {
+            if (saved.stage === 'done') {
+              setCompletedResumeNotice({
+                currentStage: saved.stage ?? null,
+                updatedAt: saved.savedAt ?? null,
+                submissionKey: saved.submissionKey ?? null,
+              })
+              return
+            }
+
+            setResumeCandidate({
+              source: 'local',
+              progressSnapshot: saved,
+              currentStage: saved.stage ?? null,
+              updatedAt: saved.savedAt ?? null,
+              submissionKey: saved.submissionKey ?? null,
+            })
+            return
+          }
+        }
+
+        const server = await fetchServerProgress(resumeSession)
+
+        if (cancelled) return
+
+        if (server?.found && server?.isCompleted) {
+          setCompletedResumeNotice({
+            currentStage: server.currentStage ?? null,
+            updatedAt: server.updatedAt ?? null,
+            submissionKey: server.submissionKey ?? null,
+          })
+          return
+        }
+
+        if (server?.found && server?.progressSnapshot) {
+          setServerSubmissionKey(server.submissionKey ?? null)
+          setResumeCandidate({
+            source: 'server',
+            progressSnapshot: server.progressSnapshot,
+            currentStage: server.currentStage ?? server.progressSnapshot?.stage ?? null,
+            updatedAt: server.updatedAt ?? server.progressSnapshot?.savedAt ?? null,
+            submissionKey: server.submissionKey ?? null,
+          })
+          return
+        }
+
+        setProgressHydrated(true)
+      } catch (error) {
+        console.error('恢復進度查詢失敗:', error)
+        setProgressHydrated(true)
+      }
+    }
+
+    void hydrateProgress()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    enterSession,
+    participantCode,
+    progressHydrated,
+    resumeCandidate,
+    completedResumeNotice,
+  ])
+
+  const handleResumeContinue = useCallback(() => {
+    if (!resumeCandidate || !participantCode) return
+
+    restoreProgressSnapshot(resumeCandidate.progressSnapshot)
+
+    if (resumeCandidate.submissionKey) {
+      setServerSubmissionKey(resumeCandidate.submissionKey)
+    }
+
+    const snapshot = {
+      ...resumeCandidate.progressSnapshot,
+      participantCode,
+      savedAt: new Date().toISOString(),
+    }
+
+    localStorage.setItem(
+      `animal-classifier-progress:${participantCode}`,
+      JSON.stringify(snapshot)
+    )
+
+    const restoredStageRaw = resumeCandidate.progressSnapshot?.stage ?? 'stage1'
+    const restoredStage = (restoredStageRaw === 'awareness' ? 'reflection' : restoredStageRaw) as AppStage
+    setEventLogs((previous) => [
+      ...previous,
+      {
+        stage: restoredStage,
+        questionId: null,
+        eventType: 'resume_progress',
+        eventValue: {
+          source: resumeCandidate.source,
+          restoredStage: resumeCandidate.currentStage ?? resumeCandidate.progressSnapshot?.stage ?? null,
+          restoredSubmissionKey: resumeCandidate.submissionKey ?? null,
+          restoredUpdatedAt: resumeCandidate.updatedAt ?? null,
+        },
+        clientTs: new Date().toISOString(),
+      },
+    ])
+
+    setResumeCandidate(null)
+    setProgressHydrated(true)
+  }, [participantCode, restoreProgressSnapshot, resumeCandidate])
 
   useEffect(() => {
     if (!participantCode || !progressHydrated) return
 
-    const progress = {
-  participantCode,
-  stage,
-  groups,
-  bankCardIds,
-  overallReason,
-  groupCreateCount,
-  cardMoveCount,
-  bridgeReflectAnswers,
-  diagnosticFeatures,
-  possibleFeatures,
-  customFeatureText,
-  readinessAnswers,
-  readinessAttemptCounts,
-  awarenessCommitment,
-  awarenessSecondsSpent,
-  evidenceResponses,
-  transferResponses,
-  evidenceItemLogs,
-  transferItemLogs,
-  eventLogs,
-  evidenceDraft: {
-    index: evidenceIndex,
-    answer: evidenceAnswer,
-    selectedFeatures: buildSelectedFeatures(
-      evidencePrimaryFeature,
-      evidenceSecondaryFeatures,
-      currentEvidenceFeatureOptions,
-      2
-    ),
-    primaryFeature: evidencePrimaryFeature,
-    secondaryFeatures: evidenceSecondaryFeatures,
-    reasonText: evidenceReasonText,
-    exclusionReasonText: evidenceExclusionReasonText,
-    confidence: evidenceConfidence,
-    familiarity: evidenceFamiliarity,
-    learnedBefore: evidenceLearnedBefore,
-  },
-  transferDraft: {
-    index: transferIndex,
-    answer: transferAnswer,
-    selectedFeatures: buildSelectedFeatures(
-      transferPrimaryFeature,
-      transferSecondaryFeatures,
-      currentTransferFeatureOptions,
-      2
-    ),
-    primaryFeature: transferPrimaryFeature,
-    secondaryFeatures: transferSecondaryFeatures,
-    reasonText: transferReasonText,
-    exclusionReasonText: transferExclusionReasonText,
-    confidence: transferConfidence,
-    familiarity: transferFamiliarity,
-    learnedBefore: transferLearnedBefore,
-  },
-  savedAt: new Date().toISOString(),
-}
-
-    localStorage.setItem(`animal-classifier-progress:${participantCode}`, JSON.stringify(progress))
-  }, [
-    participantCode,
-    progressHydrated,
-    stage,
-    groups,
-    bankCardIds,
-    overallReason,
-    groupCreateCount,
-    cardMoveCount,
-    bridgeReflectAnswers,
-    diagnosticFeatures,
-    possibleFeatures,
-    customFeatureText,
-    readinessAnswers,
-    readinessAttemptCounts,
-    awarenessCommitment,
-    awarenessSecondsSpent,
-    evidenceResponses,
-    transferResponses,
-    evidenceItemLogs,
-    transferItemLogs,
-    evidenceIndex,
-    evidenceAnswer,
-    evidenceSelectedFeatures,
-    evidencePrimaryFeature,
-    evidenceSecondaryFeatures,
-    evidenceReasonText,
-    evidenceExclusionReasonText,
-    evidenceConfidence,
-    evidenceFamiliarity,
-    evidenceLearnedBefore,
-    currentEvidenceFeatureOptions,
-    transferIndex,
-    transferAnswer,
-    transferSelectedFeatures,
-    transferPrimaryFeature,
-    transferSecondaryFeatures,
-    transferReasonText,
-    transferExclusionReasonText,
-    transferConfidence,
-    transferFamiliarity,
-    transferLearnedBefore,
-    currentTransferFeatureOptions,
-  ])
+    localStorage.setItem(
+      `animal-classifier-progress:${participantCode}`,
+      JSON.stringify(progressSnapshot)
+    )
+  }, [participantCode, progressHydrated, progressSnapshot])
 
   useEffect(() => {
     if (stage !== 'guide') {
@@ -3572,6 +3786,8 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
   const exportPayload = useMemo(
     () => ({
       participantCode,
+      studentHash,
+      student_hash: studentHash,
       participant: enterSession,
       version: APP_VERSION,
       appVersion: APP_VERSION,
@@ -3598,6 +3814,7 @@ function saveCurrentTransfer(): EvidenceResponse[] | null {
       assentAccepted: enterSession?.assentAccepted ?? false,
       formalResearchMode,
       currentResearchStage: stage,
+      progressSnapshot,
       dataQualityFlags: researchDataQualityFlags,
 featureOptionPolicy: {
   evidenceMaxSelectableFeatures: 3,
@@ -3685,6 +3902,8 @@ researchStageMapping: {
     }),
     [
   participantCode,
+  studentHash,
+  progressSnapshot,
   enterSession,
   formalResearchMode,
   groups,
@@ -3721,7 +3940,7 @@ researchStageMapping: {
 
   const submitStudentData = useCallback(
     async (mode: 'progress' | 'final') => {
-      if (!submissionKey || !enterSession) return false
+      if (!activeSubmissionKey || !enterSession) return false
 
       console.log('submit payload =', exportPayload)
       console.log('evidenceItemLogs =', exportPayload.evidenceItemLogs)
@@ -3734,7 +3953,7 @@ researchStageMapping: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          submissionKey,
+          submissionKey: activeSubmissionKey,
           participantCode,
           participant: enterSession,
           payload: exportPayload,
@@ -3753,11 +3972,11 @@ researchStageMapping: {
 
       return true
     },
-    [submissionKey, participantCode, enterSession, exportPayload, stage]
+    [activeSubmissionKey, participantCode, enterSession, exportPayload, stage]
   )
 
   useEffect(() => {
-    if (!submissionKey || !enterSession || !progressHydrated) return
+    if (!activeSubmissionKey || !enterSession || !progressHydrated) return
     if (participantCode === 'anonymous') return
     if (stage === 'done') return
     if (exportHash === lastProgressSubmittedHashRef.current) return
@@ -3781,7 +4000,7 @@ researchStageMapping: {
       }
     }
   }, [
-    submissionKey,
+    activeSubmissionKey,
     enterSession,
     participantCode,
     progressHydrated,
@@ -3791,7 +4010,7 @@ researchStageMapping: {
   ])
 
   useEffect(() => {
-    if (stage !== 'done' || !submissionKey || !enterSession) return
+    if (stage !== 'done' || !activeSubmissionKey || !enterSession) return
     if (exportHash === lastSubmittedHashRef.current) return
 
     if (progressSaveTimerRef.current) {
@@ -3829,7 +4048,7 @@ researchStageMapping: {
         window.clearTimeout(retryTimerRef.current)
       }
     }
-  }, [stage, submissionKey, enterSession, exportHash, submitStudentData])
+  }, [stage, activeSubmissionKey, enterSession, exportHash, submitStudentData])
 
   return (
     <main className="min-h-screen bg-gray-50 px-3 py-3 sm:px-4 sm:py-4 md:px-6">
@@ -3854,6 +4073,39 @@ researchStageMapping: {
           </div>
         </div>
 
+        {completedResumeNotice ? (
+          <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+            <h2 className="text-2xl font-black text-emerald-950">你已完成本次動物分類任務</h2>
+            <div className="mt-3 text-sm leading-6 text-emerald-900">
+              系統偵測到這個帳號已有完成紀錄。正式研究模式不會直接覆蓋原本資料；若老師要求重新施測，請由老師重新開啟或另外建立新的施測紀錄。
+            </div>
+            <div className="mt-4 grid gap-2 rounded-xl bg-white/70 p-3 text-sm text-emerald-950 sm:grid-cols-2">
+              <div>最後階段：{getResumeStageLabel(completedResumeNotice.currentStage)}</div>
+              <div>最近儲存：{completedResumeNotice.updatedAt ? new Date(completedResumeNotice.updatedAt).toLocaleString('zh-TW') : '未記錄'}</div>
+            </div>
+          </section>
+        ) : resumeCandidate ? (
+          <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
+            <h2 className="text-2xl font-black text-blue-950">偵測到未完成進度</h2>
+            <div className="mt-3 text-sm leading-6 text-blue-900">
+              系統找到你上次尚未完成的動物分類任務。請從上次進度繼續；正式研究模式不建議自行重新開始，以免產生重複作答紀錄。
+            </div>
+            <div className="mt-4 grid gap-2 rounded-xl bg-white/70 p-3 text-sm text-blue-950 sm:grid-cols-2">
+              <div>進度來源：{resumeCandidate.source === 'local' ? '本機暫存' : '伺服器紀錄'}</div>
+              <div>目前階段：{getResumeStageLabel(resumeCandidate.currentStage ?? resumeCandidate.progressSnapshot?.stage)}</div>
+              <div>最近儲存：{resumeCandidate.updatedAt ? new Date(resumeCandidate.updatedAt).toLocaleString('zh-TW') : '未記錄'}</div>
+              <div>學生：{enterSession ? `${enterSession.grade} 年級 ${enterSession.className} 班 ${enterSession.seatNo} 號` : '未讀到進入資訊'}</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleResumeContinue}
+              className="mt-5 rounded-xl bg-blue-700 px-5 py-3 text-sm font-bold text-white hover:bg-blue-800"
+            >
+              繼續上次進度
+            </button>
+          </section>
+        ) : (
+          <>
         <StepHeader stage={stage} setStage={setStage} maxUnlockedIndex={maxUnlockedIndex} />
 
         {isDev ? (
@@ -4705,7 +4957,7 @@ researchStageMapping: {
                       }}
                       className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 sm:w-auto"
                     >
-                      {evidenceIndex < stage3EvidenceQuestions.length - 1 ? '儲存並下一題' : '進入階段 4'}
+                      {evidenceIndex < stage3EvidenceQuestions.length - 1 ? '儲存並下一題' : '進入第 5 階段'}
                     </button>
                   </div>
                 </div>
@@ -4981,7 +5233,7 @@ researchStageMapping: {
       <SummaryBlock title="你目前的優勢">
         <div className="space-y-2">
           <div>
-            第 5 階段正確 {correctCount} / {stage3EvidenceQuestions.length} 題，
+            第 4 階段正確 {correctCount} / {stage3EvidenceQuestions.length} 題，
             第 5 階段正確 {transferCorrectCount} / {transferQuestions.length} 題。
           </div>
           <div>
@@ -5148,6 +5400,8 @@ researchStageMapping: {
   </section>
 )}
         </div>
+          </>
+        )}
       </div>
     </main>
   )
