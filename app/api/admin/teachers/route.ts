@@ -111,15 +111,30 @@ async function loadTeachers(admin: any) {
 }
 
 async function loadAvailableClasses(admin: any) {
-  const { data, error } = await admin
-    .from('learning_records')
-    .select('school_code, grade, class_name')
-    .not('school_code', 'is', null)
-    .not('class_name', 'is', null)
-    .order('school_code', { ascending: true })
-    .order('class_name', { ascending: true })
+  // 教師授權班級不應主要來自 learning_records。
+  // learning_records 會混入課程體驗、demo、manual 測試資料，造成授權清單污染。
+  // 正式授權清單改由：
+  // 1. student_roster：已有正式學生名單的班級
+  // 2. teacher_class_assignments：已由申請審核或管理員建立過的授權班級
+  // 共同產生。
 
-  if (error) throw new Error(error.message)
+  const [rosterResult, assignmentResult] = await Promise.all([
+    admin
+      .from('student_roster')
+      .select('school_code, grade, class_name')
+      .eq('is_active', true)
+      .order('school_code', { ascending: true })
+      .order('class_name', { ascending: true }),
+    admin
+      .from('teacher_class_assignments')
+      .select('school_code, school_name, grade, class_name')
+      .eq('is_active', true)
+      .order('school_code', { ascending: true })
+      .order('class_name', { ascending: true }),
+  ])
+
+  if (rosterResult.error) throw new Error(rosterResult.error.message)
+  if (assignmentResult.error) throw new Error(assignmentResult.error.message)
 
   const seen = new Set<string>()
   const classes: Array<{
@@ -129,26 +144,36 @@ async function loadAvailableClasses(admin: any) {
     className: string
   }> = []
 
-  for (const row of data ?? []) {
+  function addClass(row: any, fallbackSchoolName?: string | null) {
     const schoolCode = normalizeString(row.school_code)
     const className = normalizeString(row.class_name)
-    if (!schoolCode || !className) continue
+    if (!schoolCode || !className) return
 
     const grade = normalizeString(row.grade)
+    const schoolName = normalizeString(row.school_name) ?? fallbackSchoolName ?? schoolCode
     const key = `${schoolCode}::${grade ?? ''}::${className}`
-    if (seen.has(key)) continue
+    if (seen.has(key)) return
     seen.add(key)
 
     classes.push({
       schoolCode,
-      schoolName: schoolCode,
+      schoolName,
       grade,
       className,
     })
   }
 
+  for (const row of rosterResult.data ?? []) {
+    addClass(row, row.school_code)
+  }
+
+  for (const row of assignmentResult.data ?? []) {
+    addClass(row, row.school_name ?? row.school_code)
+  }
+
   return classes
 }
+
 
 export async function GET(req: NextRequest) {
   try {
