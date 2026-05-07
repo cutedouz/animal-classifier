@@ -1383,7 +1383,7 @@ export default function TeacherDecisionPage() {
                           <div className="font-bold text-gray-900">{feature.feature}</div>
                           <span className="rounded-full bg-white px-2 py-1 text-xs text-gray-600">{feature.cueType}</span>
                         </div>
-                        <div className="mt-1 text-xs leading-5 text-gray-500">被選 {feature.selectedCount} 次，選到時正確率 {pct(feature.correctRateWhenSelected)}，錯用率 {pct(feature.wrongSelectionRate)}</div>
+                        <div className="mt-1 text-xs leading-5 text-gray-500">被選 {feature.selectedCount} 次，選到時正確率 {pct(feature.correctRateWhenSelected)}，選此特徵時答錯率 {pct(feature.wrongSelectionRate)}</div>
                       </div>
                     ))}
                   </div>
