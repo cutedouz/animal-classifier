@@ -1376,6 +1376,10 @@ export default function TeacherDecisionPage() {
                 </div>
                 <div className="rounded-2xl border border-gray-200 p-4">
                   <div className="mb-3 font-bold text-gray-900">最需要釐清的線索</div>
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                    <div className="font-bold">如何閱讀這一區</div>
+                    <div>長條與排序代表該特徵被學生選用的頻率，不代表越常被選就越好。請優先關注「表面線索」且「選此特徵時答錯率」偏高的項目，這些通常是下一節課需要對比澄清的分類判準。</div>
+                  </div>
                   <div className="space-y-3">
                     {data.featureMetrics.slice(0, 6).map((feature) => (
                       <div key={feature.feature} className="rounded-xl bg-gray-50 p-3 text-sm">
