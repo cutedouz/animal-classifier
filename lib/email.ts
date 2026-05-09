@@ -37,6 +37,7 @@ function buildTeacherApprovedEmail(input: TeacherApprovedEmailInput) {
   const rosterUrl = `${baseUrl}/teacher/roster`
   const enterUrl = `${baseUrl}/enter`
   const accountUrl = `${baseUrl}/teacher/account`
+  const studentDefaultPassword = process.env.STUDENT_DEFAULT_PASSWORD || 'sci'
   const classText = input.classNames.join('、') || '尚未設定班級，請登入後確認。'
   const subject = `Sci-Flipper 教師帳號已建立：${input.username}`
 
@@ -69,6 +70,13 @@ function buildTeacherApprovedEmail(input: TeacherApprovedEmailInput) {
         <a href="${accountUrl}" style="display:block;background:#4b5563;color:white;text-decoration:none;border-radius:10px;padding:12px 14px;font-weight:700;">修改教師密碼</a>
       </div>
 
+      <div style="background:#eef6ff;border:1px solid #bfdbfe;border-radius:14px;padding:14px;margin:14px 0;">
+        <p style="margin:0 0 8px;font-size:14px;"><strong>學生登入資訊</strong></p>
+        <p style="margin:0 0 8px;font-size:14px;">學生入口頁：<a href="${enterUrl}" style="color:#1d4ed8;">${enterUrl}</a></p>
+        <p style="margin:0 0 8px;font-size:14px;">學生登入方式：請學生選擇學校、班級與座號進入。</p>
+        <p style="margin:0 0 8px;font-size:14px;">學生預設密碼：<strong>${escapeHtml(studentDefaultPassword)}</strong></p>
+        <p style="margin:0;font-size:13px;line-height:1.6;color:#4b5563;">請提醒學生輸入小寫 ${escapeHtml(studentDefaultPassword)}。</p>
+      </div>
       <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin:14px 0;">
         <p style="margin:0 0 8px;font-size:14px;"><strong>授權學校：</strong>${escapeHtml(input.schoolName)}</p>
         <p style="margin:0;font-size:14px;line-height:1.7;"><strong>授權班級：</strong>${escapeHtml(classText)}</p>
@@ -99,6 +107,12 @@ function buildTeacherApprovedEmail(input: TeacherApprovedEmailInput) {
     `學生名單上傳頁：${rosterUrl}`,
     `學生入口頁：${enterUrl}`,
     `教師帳號設定／修改密碼：${accountUrl}`,
+    '',
+    '學生登入資訊',
+    `學生入口頁：${enterUrl}`,
+    '學生登入方式：請學生選擇學校、班級與座號進入。',
+    `學生預設密碼：${studentDefaultPassword}`,
+    `請提醒學生輸入小寫 ${studentDefaultPassword}。`,
     '',
     `授權學校：${input.schoolName}`,
     `授權班級：${classText}`,
