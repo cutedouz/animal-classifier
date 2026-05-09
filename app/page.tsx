@@ -125,6 +125,10 @@ type EnterSession = {
   learningExperienceLabel?: string
   researchMode?: string
   researchEntryVersion?: string
+  submissionKey?: string
+  resumeMode?: 'resume' | 'new' | 'completed_found' | string
+  resumeCurrentStage?: AppStage | string | null
+  resumePayload?: any
 }
 
 type GuideCard = {
@@ -1944,9 +1948,10 @@ export default function Page() {
     'anonymous'
 
   const submissionKey =
-    participantCode && enterSession?.enteredAt
+    enterSession?.submissionKey ||
+    (participantCode && enterSession?.enteredAt
       ? `${participantCode}:${enterSession.enteredAt}`
-      : participantCode
+      : participantCode)
 
   const formalResearchMode = isFormalResearchSession(enterSession)
   const researchModeLabel = getResearchModeLabel(enterSession)
@@ -1954,22 +1959,13 @@ export default function Page() {
   useEffect(() => {
     if (!participantCode || participantCode === 'anonymous' || progressHydrated) return
 
-    try {
-      const raw = localStorage.getItem(`animal-classifier-progress:${participantCode}`)
-      if (!raw) {
-        setProgressHydrated(true)
-        return
-      }
+    function normalizeSavedStage(value: unknown): AppStage {
+      const raw = typeof value === 'string' && value.trim().length > 0 ? value : 'stage1'
+      return (raw === 'awareness' ? 'reflection' : raw) as AppStage
+    }
 
-      const saved = JSON.parse(raw)
-
-      if (saved?.participantCode !== participantCode) {
-        setProgressHydrated(true)
-        return
-      }
-
-      const savedStageRaw = saved.stage ?? 'stage1'
-      const savedStage = (savedStageRaw === 'awareness' ? 'reflection' : savedStageRaw) as AppStage
+    function hydrateFromSaved(saved: any) {
+      const savedStage = normalizeSavedStage(saved.stage)
       const savedEvidenceResponses: EvidenceResponse[] = saved.evidenceResponses ?? []
       const savedTransferResponses: EvidenceResponse[] = saved.transferResponses ?? []
 
@@ -2041,12 +2037,74 @@ export default function Page() {
         setTransferFamiliarity(savedTransferDraft?.familiarity ?? null)
         setTransferLearnedBefore(savedTransferDraft?.learnedBefore ?? 'unsure')
       }
+    }
 
+    try {
+      const resumePayload = enterSession?.resumePayload
+
+      if (
+        submissionKey &&
+        resumePayload &&
+        (enterSession?.resumeMode === 'resume' ||
+          enterSession?.resumeMode === 'completed_found')
+      ) {
+        hydrateFromSaved({
+          participantCode,
+          stage:
+            enterSession?.resumeCurrentStage ??
+            resumePayload?.researchDataQualityFlags?.currentAppStage ??
+            resumePayload?.currentStage ??
+            resumePayload?.stage ??
+            'stage1',
+          groups: resumePayload?.stage1?.groups,
+          bankCardIds: resumePayload?.stage1?.bankCardIds,
+          overallReason: resumePayload?.stage1?.overallReason,
+          groupCreateCount: resumePayload?.stage1?.groupCreateCount,
+          cardMoveCount: resumePayload?.stage1?.cardMoveCount,
+          bridgeReflectAnswers: resumePayload?.awareness?.bridgeReflectAnswers,
+          diagnosticFeatures: resumePayload?.awareness?.diagnosticFeatures,
+          possibleFeatures: resumePayload?.awareness?.possibleFeatures,
+          customFeatureText: resumePayload?.awareness?.customFeatureText,
+          readinessAnswers: resumePayload?.awareness?.readinessAnswers,
+          readinessAttemptCounts: resumePayload?.awareness?.readinessAttemptCounts,
+          awarenessCommitment: resumePayload?.awareness?.awarenessCommitment,
+          awarenessSecondsSpent: resumePayload?.awareness?.awarenessSecondsSpent,
+          evidenceResponses: resumePayload?.evidenceResponses,
+          transferResponses: resumePayload?.transferResponses,
+          evidenceItemLogs: resumePayload?.evidenceItemLogs,
+          transferItemLogs: resumePayload?.transferItemLogs,
+          eventLogs: resumePayload?.eventLogs,
+        })
+
+        setProgressHydrated(true)
+        return
+      }
+
+      const raw = localStorage.getItem(`animal-classifier-progress:${participantCode}`)
+      if (!raw) {
+        setProgressHydrated(true)
+        return
+      }
+
+      const saved = JSON.parse(raw)
+
+      if (saved?.participantCode !== participantCode) {
+        setProgressHydrated(true)
+        return
+      }
+
+      hydrateFromSaved(saved)
       setProgressHydrated(true)
     } catch {
       setProgressHydrated(true)
     }
-  }, [participantCode, progressHydrated, stage3EvidenceQuestions.length])
+  }, [
+    participantCode,
+    progressHydrated,
+    enterSession,
+    submissionKey,
+    stage3EvidenceQuestions.length,
+  ])
 
   useEffect(() => {
     if (!participantCode || !progressHydrated) return
