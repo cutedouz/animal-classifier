@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { hashTeacherPassword } from '../../../../lib/teacherAuth'
-import { sendTeacherApprovedEmail } from '../../../../lib/email'
+import {
+  sendTeacherApprovedEmail,
+  sendTeacherApplicationStatusEmail,
+} from '../../../../lib/email'
 
 export const dynamic = 'force-dynamic'
 
@@ -332,6 +335,16 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: '申請狀態不正確。' }, { status: 400 })
     }
 
+    const shouldNotifyApplicant =
+      status === 'need_more_info' || status === 'rejected'
+
+    if (shouldNotifyApplicant && !reviewNote) {
+      return NextResponse.json(
+        { error: '退回補件或拒絕申請時，請先填寫審核備註，讓申請者知道原因或需補充的資料。' },
+        { status: 400 }
+      )
+    }
+
     const { data, error } = await admin
       .from('teacher_applications')
       .update({
@@ -347,7 +360,24 @@ export async function PATCH(req: NextRequest) {
 
     if (error) throw new Error(error.message)
 
-    return NextResponse.json({ ok: true, application: data })
+    let emailResult = null
+
+    if (shouldNotifyApplicant) {
+      emailResult = await sendTeacherApplicationStatusEmail({
+        to: clean(data.email).toLowerCase(),
+        teacherName: clean(data.teacher_name) || '老師',
+        status: status as 'need_more_info' | 'rejected',
+        reviewNote,
+        schoolName: clean(data.school_name) || '未填寫學校',
+        requestedUsername: data.requested_username ?? null,
+      })
+    }
+
+    return NextResponse.json({
+      ok: true,
+      application: data,
+      email: emailResult,
+    })
   } catch (error) {
     console.error('admin teacher applications PATCH error:', error)
     return NextResponse.json(

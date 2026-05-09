@@ -7,6 +7,15 @@ type TeacherApprovedEmailInput = {
   classNames: string[]
 }
 
+type TeacherApplicationStatusEmailInput = {
+  to: string
+  teacherName: string
+  status: 'need_more_info' | 'rejected'
+  reviewNote: string
+  schoolName: string
+  requestedUsername?: string | null
+}
+
 type SendEmailResult = {
   sent: boolean
   id: string | null
@@ -119,6 +128,140 @@ function buildTeacherApprovedEmail(input: TeacherApprovedEmailInput) {
   ].join('\n')
 
   return { subject, html, text }
+}
+
+function buildTeacherApplicationStatusEmail(input: TeacherApplicationStatusEmailInput) {
+  const baseUrl = appBaseUrl()
+  const applyUrl = `${baseUrl}/teacher/apply`
+  const adminContact = process.env.EMAIL_REPLY_TO || ''
+
+  const isNeedMoreInfo = input.status === 'need_more_info'
+  const statusLabel = isNeedMoreInfo ? '需補充資料' : '審查未通過'
+  const subject = isNeedMoreInfo
+    ? 'Sci-Flipper 教師帳號申請需補充資料'
+    : 'Sci-Flipper 教師帳號申請審查結果'
+
+  const reviewNote = input.reviewNote.trim()
+  const requestedUsernameText = input.requestedUsername?.trim()
+    ? input.requestedUsername.trim()
+    : '—'
+
+  const mainMessage = isNeedMoreInfo
+    ? '您的教師帳號申請目前需要補充資料。請依照下方審核備註補齊後，再重新送出或回信聯繫。'
+    : '您的教師帳號申請目前未通過審查。請參考下方審核備註；若需進一步說明，可回覆此信聯繫。'
+
+  const html = `<!doctype html>
+<html lang="zh-Hant">
+  <body style="margin:0;padding:20px;background:#f6f8f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans TC','Microsoft JhengHei',Arial,sans-serif;color:#111827;">
+    <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:16px;padding:22px;">
+      <h1 style="margin:0 0 14px;font-size:22px;line-height:1.35;color:#234a2c;">${escapeHtml(subject)}</h1>
+
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.7;">
+        ${escapeHtml(input.teacherName)} 老師您好，${escapeHtml(mainMessage)}
+      </p>
+
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin:14px 0;">
+        <p style="margin:0 0 8px;font-size:14px;"><strong>申請學校：</strong>${escapeHtml(input.schoolName || '—')}</p>
+        <p style="margin:0 0 8px;font-size:14px;"><strong>申請帳號：</strong>${escapeHtml(requestedUsernameText)}</p>
+        <p style="margin:0;font-size:14px;"><strong>審查狀態：</strong>${escapeHtml(statusLabel)}</p>
+      </div>
+
+      <div style="background:${isNeedMoreInfo ? '#eff6ff' : '#fef2f2'};border:1px solid ${isNeedMoreInfo ? '#bfdbfe' : '#fecaca'};border-radius:14px;padding:14px;margin:14px 0;">
+        <p style="margin:0 0 8px;font-size:14px;"><strong>審核備註</strong></p>
+        <p style="margin:0;white-space:pre-wrap;font-size:14px;line-height:1.7;">${escapeHtml(reviewNote)}</p>
+      </div>
+
+      ${
+        isNeedMoreInfo
+          ? `<p style="margin:0 0 14px;font-size:14px;line-height:1.7;">補件或重新申請頁：<a href="${applyUrl}" style="color:#1d4ed8;">${applyUrl}</a></p>`
+          : ''
+      }
+
+      ${
+        adminContact
+          ? `<p style="margin:0 0 14px;font-size:13px;line-height:1.7;color:#4b5563;">如需聯繫，您可直接回覆此信，或寄至 ${escapeHtml(adminContact)}。</p>`
+          : `<p style="margin:0 0 14px;font-size:13px;line-height:1.7;color:#4b5563;">如需聯繫，您可直接回覆此信。</p>`
+      }
+
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:18px 0;">
+      <p style="font-size:12px;line-height:1.6;color:#6b7280;margin:0;">此信由 Sci-Flipper 動物分類學習平台系統寄出。</p>
+    </div>
+  </body>
+</html>`
+
+  const text = [
+    subject,
+    '',
+    `${input.teacherName} 老師您好，${mainMessage}`,
+    '',
+    `申請學校：${input.schoolName || '—'}`,
+    `申請帳號：${requestedUsernameText}`,
+    `審查狀態：${statusLabel}`,
+    '',
+    '審核備註',
+    reviewNote,
+    '',
+    isNeedMoreInfo ? `補件或重新申請頁：${applyUrl}` : '',
+    adminContact ? `聯繫信箱：${adminContact}` : '如需聯繫，您可直接回覆此信。',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  return { subject, html, text }
+}
+
+export async function sendTeacherApplicationStatusEmail(input: TeacherApplicationStatusEmailInput): Promise<SendEmailResult> {
+  const gasWebappUrl = process.env.GAS_WEBAPP_URL
+  const gasSecret = process.env.GAS_WEBAPP_SECRET
+  const replyTo = process.env.EMAIL_REPLY_TO
+
+  if (!gasWebappUrl) return { sent: false, id: null, error: 'GAS_WEBAPP_URL missing', provider: 'gmail_gas' }
+  if (!gasSecret) return { sent: false, id: null, error: 'GAS_WEBAPP_SECRET missing', provider: 'gmail_gas' }
+  if (!input.to || !input.to.includes('@')) return { sent: false, id: null, error: 'invalid recipient email', provider: 'gmail_gas' }
+  if (!input.reviewNote.trim()) return { sent: false, id: null, error: 'review note missing', provider: 'gmail_gas' }
+
+  const email = buildTeacherApplicationStatusEmail(input)
+
+  try {
+    const response = await fetch(gasWebappUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        secret: gasSecret,
+        to: input.to,
+        subject: email.subject,
+        html: email.html,
+        text: email.text,
+        replyTo: replyTo || '',
+      }),
+      redirect: 'follow',
+    })
+
+    const result = await response.json().catch(() => null)
+
+    if (!response.ok || !result?.ok) {
+      return {
+        sent: false,
+        id: null,
+        error: typeof result?.error === 'string' ? result.error : `GAS email failed: HTTP ${response.status}`,
+        provider: 'gmail_gas',
+      }
+    }
+
+    return {
+      sent: true,
+      id: typeof result.messageId === 'string' ? result.messageId : `gas-${Date.now()}`,
+      error: null,
+      provider: 'gmail_gas',
+    }
+  } catch (error) {
+    return {
+      sent: false,
+      id: null,
+      error: error instanceof Error ? error.message : 'GAS email request failed',
+      provider: 'gmail_gas',
+    }
+  }
 }
 
 export async function sendTeacherApprovedEmail(input: TeacherApprovedEmailInput): Promise<SendEmailResult> {
