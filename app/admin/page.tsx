@@ -174,6 +174,15 @@ export default function AdminCenterPage() {
     setMessage('')
     setActionLoadingId(id)
 
+    const note = (reviewNote[id] ?? '').trim()
+    const shouldNotifyApplicant = status === 'need_more_info' || status === 'rejected'
+
+    if (shouldNotifyApplicant && !note) {
+      setError('退回補件或拒絕申請時，請先填寫審核備註，系統會將備註寄給申請者。')
+      setActionLoadingId('')
+      return
+    }
+
     try {
       const response = await fetch('/api/admin/teacher-applications', {
         method: 'PATCH',
@@ -184,14 +193,23 @@ export default function AdminCenterPage() {
         body: JSON.stringify({
           id,
           status,
-          reviewNote: reviewNote[id] ?? '',
+          reviewNote: note,
         }),
       })
 
       const result = await response.json()
       if (!response.ok) throw new Error(result?.error || '更新失敗。')
 
-      setMessage('申請狀態已更新。')
+      if (shouldNotifyApplicant) {
+        const emailText = result.email?.sent
+          ? 'Email 通知已寄出。'
+          : `Email 未寄出：${result.email?.error ?? '原因不明'}。`
+
+        setMessage(`申請狀態已更新。${emailText}`)
+      } else {
+        setMessage('申請狀態已更新。')
+      }
+
       await loadAll()
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新失敗。')
@@ -368,7 +386,21 @@ export default function AdminCenterPage() {
                           </span>
                         </div>
                         <div className="mt-2 text-sm leading-6 text-gray-600">
-                          {app.school_name}{app.county ? `（${app.county}）` : ''}｜{app.email}
+                          {app.school_name}{app.county ? `（${app.county}）` : ''}
+                        </div>
+                        <div className="text-sm leading-6 text-gray-700">
+                          聯絡信箱：
+                          {app.email ? (
+                            <a
+                              href={`mailto:${app.email}`}
+                              className="font-semibold text-blue-700 underline underline-offset-2"
+                            >
+                              {app.email}
+                            </a>
+                          ) : (
+                            '—'
+                          )}
+                          {app.phone ? `｜電話：${app.phone}` : ''}
                         </div>
                         <div className="text-sm leading-6 text-gray-600">
                           希望帳號：<span className="font-mono">{app.requested_username ?? '—'}</span>｜
@@ -428,7 +460,7 @@ export default function AdminCenterPage() {
                         onChange={(e) => setReviewNote((prev) => ({ ...prev, [app.id]: e.target.value }))}
                         rows={2}
                         className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                        placeholder="例如：已核准建立帳號；系統已寄出教師登入與學生名單上傳連結。"
+                        placeholder="退回補件或拒絕時，請務必寫清楚原因或需補充的資料；系統會將此備註寄給申請者。"
                       />
                     </div>
 
