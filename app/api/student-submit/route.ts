@@ -207,6 +207,12 @@ function dedupeItemLogs(items: IncomingItemLog[]) {
   return [...map.values()]
 }
 
+function getAnsweredTotal(payload: any) {
+  return Number(
+    payload?.dataQualityFlags?.completeness?.answeredTotalCount ?? 0
+  )
+}
+
 function normalizeEventLog(event: IncomingEventLog) {
   return {
     stage:
@@ -271,6 +277,8 @@ export async function POST(req: Request) {
       )
     }
 
+    const answeredTotalCount = getAnsweredTotal(payload)
+
     const record = {
       submission_key: submissionKey,
       participant_code: participantCode,
@@ -287,6 +295,11 @@ export async function POST(req: Request) {
       is_completed: isCompleted,
       version:
         typeof payload.version === 'string' ? payload.version : null,
+      attempt_status: isCompleted
+        ? 'completed'
+        : answeredTotalCount > 0
+          ? 'active'
+          : 'abandoned',
       updated_at: new Date().toISOString(),
     }
 

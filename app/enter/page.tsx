@@ -552,42 +552,74 @@ function validateResearchBackground(mode: EntryMode) {
       enteredAt,
     }
 
+      const resumeResponse = await fetch('/api/learning-records/start-or-resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: base.studentId,
+          schoolCode: base.schoolCode,
+          schoolYear: base.schoolYear,
+          semester: base.semester,
+          grade: base.grade,
+          className: base.className,
+          seatNo: base.seatNo,
+          maskedName: base.maskedName,
+          entrySession,
+        }),
+      })
+
+      const resumeResult = await resumeResponse.json()
+
+      if (!resumeResponse.ok || !resumeResult?.ok || !resumeResult?.submissionKey) {
+        throw new Error(resumeResult?.error ?? 'start-or-resume failed')
+      }
+
+      const enhancedEntrySession = {
+        ...entrySession,
+        resumeMode: resumeResult.mode,
+        submissionKey: resumeResult.submissionKey,
+        resumeCurrentStage: resumeResult.record?.current_stage ?? null,
+        resumePayload: resumeResult.record?.payload ?? null,
+      }
+
       localStorage.setItem(
         'animal-classifier-enter-session',
-        JSON.stringify(entrySession)
+        JSON.stringify(enhancedEntrySession)
       )
 
       const params = new URLSearchParams({
-  studentId: base.studentId,
-  schoolCode: base.schoolCode,
-  schoolYear: base.schoolYear,
-  semester: base.semester,
-  grade: base.grade,
-  className: base.className,
-  seatNo: base.seatNo,
-  entryMode: mode,
-  platformMode: platformMeta.platformMode,
-  dataUseScope: platformMeta.dataUseScope,
-  taskVariant: platformMeta.taskVariant,
-  formalRosterImported: String(platformMeta.formalRosterImported),
-  appVersion: APP_VERSION,
-  itemBankVersion: ITEM_BANK_VERSION,
-  rubricVersion: RUBRIC_VERSION,
-  consentVersion: mode === 'roster' ? CONSENT_VERSION : '',
-  assentAccepted: String(mode === 'roster'),
-  enteredAt,
-  userRole: researchBackground.userRole,
-  useContext: researchBackground.useContext,
-  animalClassificationExperience:
-    researchBackground.animalClassificationExperience || '不確定',
-  learningExperience: mapLearningExperience(
-    researchBackground.animalClassificationExperience
-  ),
-  learningExperienceLabel:
-    researchBackground.animalClassificationExperience || '不確定',
-  researchMode: platformMeta.researchMode,
-  researchEntryVersion: APP_VERSION,
-})
+        studentId: base.studentId,
+        schoolCode: base.schoolCode,
+        schoolYear: base.schoolYear,
+        semester: base.semester,
+        grade: base.grade,
+        className: base.className,
+        seatNo: base.seatNo,
+        entryMode: mode,
+        platformMode: platformMeta.platformMode,
+        dataUseScope: platformMeta.dataUseScope,
+        taskVariant: platformMeta.taskVariant,
+        formalRosterImported: String(platformMeta.formalRosterImported),
+        appVersion: APP_VERSION,
+        itemBankVersion: ITEM_BANK_VERSION,
+        rubricVersion: RUBRIC_VERSION,
+        consentVersion: mode === 'roster' ? CONSENT_VERSION : '',
+        assentAccepted: String(mode === 'roster'),
+        enteredAt,
+        submissionKey: String(resumeResult.submissionKey),
+        resumeMode: String(resumeResult.mode ?? ''),
+        userRole: researchBackground.userRole,
+        useContext: researchBackground.useContext,
+        animalClassificationExperience:
+          researchBackground.animalClassificationExperience || '不確定',
+        learningExperience: mapLearningExperience(
+          researchBackground.animalClassificationExperience
+        ),
+        learningExperienceLabel:
+          researchBackground.animalClassificationExperience || '不確定',
+        researchMode: platformMeta.researchMode,
+        researchEntryVersion: APP_VERSION,
+      })
 
       router.push(`${TARGET_PATH}?${params.toString()}`)
     } catch (error) {
@@ -617,8 +649,8 @@ function validateResearchBackground(mode: EntryMode) {
     const name = manualName.trim()
     const seat = manualSeatNo.trim()
 
-    if (!school || !cls || !name) {
-      setLookupError('請至少填寫學校、班級與姓名。')
+    if (!school || !cls || !seat || !name) {
+      setLookupError('請完整填寫學校、班級、座號與姓名。')
       return
     }
 
