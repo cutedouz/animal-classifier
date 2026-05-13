@@ -225,6 +225,9 @@ type QualitativeQuestionFocus = {
 
 type QualitativeResponse = {
   ok: true
+  requiresFilter?: true
+  message?: string
+  warning?: string
   summary: {
     recordCount: number
     itemLogCount: number
@@ -275,6 +278,47 @@ const INITIAL_FILTERS: FiltersState = {
   riskOnly: false,
 }
 
+function normalizeFilterValue(value: string) {
+  const normalized = value.trim()
+  if (!normalized) return ""
+  if (normalized === "all") return ""
+  if (normalized === "全部學校") return ""
+  if (normalized === "全部年級") return ""
+  if (normalized === "全部班級") return ""
+  if (normalized === "undefined") return ""
+  if (normalized === "null") return ""
+  if (normalized === "[object Object]") return ""
+  return normalized
+}
+
+function emptyQualitativeSummary() {
+  return {
+    recordCount: 0,
+    itemLogCount: 0,
+    reasonCount: 0,
+    exclusionReasonCount: 0,
+    shortReasonRate: null,
+    missingExclusionRate: null,
+    surfaceReasonRate: null,
+    structuralReasonRate: null,
+    highConfidenceWrongReasonCount: 0,
+  }
+}
+
+function emptyQualitativeResponse(extra: Partial<QualitativeResponse> = {}): QualitativeResponse {
+  return {
+    ok: true,
+    summary: emptyQualitativeSummary(),
+    patterns: [],
+    questionFocus: [],
+    examples: [],
+    ...extra,
+  }
+}
+
+const QUALITATIVE_REQUIRES_FILTER_MESSAGE = "請先選擇學校、年級或班級後，再載入質性分析。"
+const QUALITATIVE_FALLBACK_MESSAGE = "質性資料暫時無法載入，請先查看班級總覽與題目診斷。"
+
 function pct(value: number | null | undefined, digits = 0) {
   if (value == null || Number.isNaN(value)) return "—"
   return `${(value * 100).toFixed(digits)}%`
@@ -318,14 +362,6 @@ function supportTone(tone: SupportType["tone"]) {
     gray: "bg-gray-100 text-gray-700",
   }
   return map[tone]
-}
-
-function riskTone(level: StudentRow["riskLevel"] | string) {
-  if (level === "高") return "bg-red-100 text-red-700"
-  if (level === "中") return "bg-amber-100 text-amber-800"
-  if (level === "低") return "bg-green-100 text-green-700"
-  if (level === "未完成") return "bg-gray-100 text-gray-700"
-  return "bg-slate-100 text-slate-700"
 }
 
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
@@ -901,6 +937,7 @@ export default function TeacherDecisionPage() {
   const [qualitative, setQualitative] = useState<QualitativeResponse | null>(null)
   const [qualitativeLoading, setQualitativeLoading] = useState(false)
   const [qualitativeError, setQualitativeError] = useState("")
+  const [qualitativeNotice, setQualitativeNotice] = useState("")
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -916,6 +953,14 @@ export default function TeacherDecisionPage() {
     if (filters.riskOnly) params.set("riskOnly", "true")
     return params.toString()
   }, [filters])
+
+  const hasMeaningfulFilter = useMemo(
+    () =>
+      [filters.schoolCode, filters.grade, filters.className, filters.participantCode].some(
+        (value) => normalizeFilterValue(value).length > 0
+      ),
+    [filters.schoolCode, filters.grade, filters.className, filters.participantCode]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -962,9 +1007,20 @@ export default function TeacherDecisionPage() {
   useEffect(() => {
     let cancelled = false
 
+    if (!hasMeaningfulFilter) {
+      setQualitative(emptyQualitativeResponse({ requiresFilter: true }))
+      setQualitativeError("")
+      setQualitativeNotice(QUALITATIVE_REQUIRES_FILTER_MESSAGE)
+      setQualitativeLoading(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
     async function run() {
       setQualitativeLoading(true)
       setQualitativeError("")
+      setQualitativeNotice("")
       try {
         const response = await fetch(`/api/teacher-qualitative?${queryString}`, { cache: "no-store" })
 
@@ -974,12 +1030,15 @@ export default function TeacherDecisionPage() {
         }
 
         const result = await response.json()
-        if (!response.ok) throw new Error(result?.error || "讀取質性資料失敗")
+        if (!response.ok) throw new Error(QUALITATIVE_FALLBACK_MESSAGE)
 
-        if (!cancelled) setQualitative(result)
-      } catch (err) {
         if (!cancelled) {
-          setQualitativeError(err instanceof Error ? err.message : "質性資料讀取失敗")
+          setQualitative(result)
+          setQualitativeNotice(result?.warning || result?.message || "")
+        }
+      } catch {
+        if (!cancelled) {
+          setQualitativeError(QUALITATIVE_FALLBACK_MESSAGE)
           setQualitative(null)
         }
       } finally {
@@ -991,7 +1050,7 @@ export default function TeacherDecisionPage() {
     return () => {
       cancelled = true
     }
-  }, [queryString])
+  }, [queryString, hasMeaningfulFilter])
 
   async function handleTeacherLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1255,7 +1314,9 @@ export default function TeacherDecisionPage() {
               {qualitativeLoading ? (
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">質性資料讀取中…</div>
               ) : qualitativeError ? (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{qualitativeError}</div>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{qualitativeError}</div>
+              ) : qualitativeNotice ? (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">{qualitativeNotice}</div>
               ) : !qualitative ? (
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">目前沒有可分析的理由文字資料。</div>
               ) : (
