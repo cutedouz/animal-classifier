@@ -50,10 +50,6 @@ function safeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function asNumber(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
 function ratio(numerator: number, denominator: number) {
   return denominator > 0 ? numerator / denominator : null
 }
@@ -62,12 +58,6 @@ function compactText(value: string | null | undefined, max = 90) {
   const text = safeString(value)
   if (!text) return ''
   return text.length > max ? `${text.slice(0, max)}…` : text
-}
-
-function stageLabelForInterpretation(stage: string) {
-  if (stage === 'evidence') return '帶提示判定'
-  if (stage === 'transfer') return '遷移應用'
-  return stage
 }
 
 function parsePayloadInfo(payload: JsonRecord | null) {
