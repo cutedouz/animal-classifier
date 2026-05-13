@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
   getTeacherAuthFromRequest,
   recordMatchesTeacherAssignments,
+  type TeacherAuth,
+  type TeacherAssignment,
 } from '../../../lib/teacherAuth'
 
 export const dynamic = 'force-dynamic'
@@ -234,6 +236,7 @@ type FiltersResponse = {
 
 type DashboardResponse = {
   ok: true
+  requiresFilter?: true
   filters: FiltersResponse
   summary: Summary
   sampleBases: SampleBases
@@ -445,6 +448,126 @@ function ratio(numerator: number, denominator: number) {
 
 function unique<T>(values: T[]) {
   return [...new Set(values)]
+}
+
+function isFormalSchoolCode(value: string | null | undefined) {
+  const school = value?.trim()
+  if (!school) return false
+  if (school.startsWith('manual:')) return false
+  if (school === 'demo-school') return false
+  if (school.includes('測試')) return false
+  if (school.toLowerCase().includes('test')) return false
+  return true
+}
+
+function uniqueSortedNonEmpty(values: Array<string | null | undefined>) {
+  return unique(
+    values
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value) => value.length > 0)
+  ).sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+}
+
+function emptySummary(): Summary {
+  return {
+    totalStudents: 0,
+    completedStudents: 0,
+    completionRate: null,
+    evidenceAccuracy: null,
+    transferAccuracy: null,
+    sdi: null,
+    avgEvidenceDurationSec: null,
+    avgTransferDurationSec: null,
+    medianEvidenceDurationSec: null,
+    medianTransferDurationSec: null,
+    zoomUserRate: null,
+    avgStructuralFeatureRate: null,
+    avgReasonCharCount: null,
+  }
+}
+
+function emptySampleBases(): SampleBases {
+  return {
+    totalStudents: 0,
+    completedStudents: 0,
+    evidenceStudents: 0,
+    evidenceItems: 0,
+    transferStudents: 0,
+    transferItems: 0,
+    zoomStudents: 0,
+    zoomEvents: 0,
+    awarenessStudents: 0,
+  }
+}
+
+function emptyCounts() {
+  return {
+    records: 0,
+    itemLogs: 0,
+    eventLogs: 0,
+  }
+}
+
+type SchoolFilterRow = {
+  school_code: string | null
+  grade: string | null
+  class_name: string | null
+}
+
+function filtersFromSchoolRows(rows: SchoolFilterRow[]): FiltersResponse {
+  const formalRows = rows.filter((row) => isFormalSchoolCode(row.school_code))
+
+  return {
+    schoolCodes: uniqueSortedNonEmpty(formalRows.map((row) => row.school_code)),
+    grades: uniqueSortedNonEmpty(formalRows.map((row) => row.grade)),
+    classNames: uniqueSortedNonEmpty(formalRows.map((row) => row.class_name)),
+    userRoles: [],
+    useContexts: [],
+    animalClassificationExperiences: [],
+    stages: STAGE_KEYS,
+  }
+}
+
+function filtersFromAssignments(assignments: TeacherAssignment[]): FiltersResponse {
+  return filtersFromSchoolRows(assignments)
+}
+
+async function loadInitialFilters(
+  admin: SupabaseClient,
+  teacherAuth: TeacherAuth
+): Promise<FiltersResponse> {
+  if (!teacherAuth.isSuperAdmin) {
+    return filtersFromAssignments(teacherAuth.assignments)
+  }
+
+  const { data: assignmentRows, error: assignmentError } = await admin
+    .from('teacher_class_assignments')
+    .select('school_code, grade, class_name')
+    .eq('is_active', true)
+
+  if (assignmentError) {
+    throw new Error(assignmentError.message)
+  }
+
+  const { data: recordRows, error: recordError } = await admin
+    .from('learning_records')
+    .select('school_code, grade, class_name')
+    .not('school_code', 'is', null)
+    .not('school_code', 'ilike', 'manual:%')
+    .neq('school_code', 'demo-school')
+    .not('school_code', 'ilike', '%測試%')
+    .not('school_code', 'ilike', '%test%')
+    .order('updated_at', { ascending: false })
+    .range(0, 4999)
+
+  if (recordError) {
+    throw new Error(recordError.message)
+  }
+
+  return filtersFromSchoolRows([
+    ...((assignmentRows ?? []) as SchoolFilterRow[]),
+    ...((recordRows ?? []) as SchoolFilterRow[]),
+  ])
 }
 
 function normalizeFeatureName(feature: unknown) {
@@ -711,6 +834,34 @@ export async function GET(req: NextRequest) {
       searchParams.get('animalClassificationExperience')?.trim() ?? ''
     const completedOnly = searchParams.get('completedOnly') === 'true'
     const riskOnly = searchParams.get('riskOnly') === 'true'
+
+    const hasRecordScopeFilter = Boolean(schoolCode || grade || className || participantCode)
+
+    if (!hasRecordScopeFilter) {
+      const initialFilters = await loadInitialFilters(admin, teacherAuth)
+
+      return NextResponse.json({
+        ok: true,
+        requiresFilter: true,
+        filters: initialFilters,
+        summary: emptySummary(),
+        sampleBases: emptySampleBases(),
+        sampleWarnings: [],
+        stageFunnel: [],
+        riskDistribution: [],
+        studentRows: [],
+        highRiskStudents: [],
+        strongestStudents: [],
+        questionMetrics: [],
+        featureMetrics: [],
+        misconceptionMetrics: [],
+        featureQualitySummary: { high: 0, partial: 0, surfaceOrMisleading: 0, unclear: 0 },
+        averagePrimaryHitCount: 0,
+        averageMisleadingHitCount: 0,
+        insightCards: [],
+        counts: emptyCounts(),
+      } satisfies DashboardResponse)
+    }
 
     let recordQuery = admin
       .from('learning_records')
@@ -1176,20 +1327,20 @@ for (const item of enrichedItems.filter((row) => row.is_correct === false)) {
       .sort((a, b) => (b.transferAccuracy ?? 0) - (a.transferAccuracy ?? 0))
       .slice(0, 10)
 
-    const filterRows = (filterValuesResponse.data ?? []).filter((row: any) => recordMatchesTeacherAssignments(row, teacherAuth.assignments)) as Array<{ school_code: string | null; grade: string | null; class_name: string | null }>
+    const filterRows = ((filterValuesResponse.data ?? []) as SchoolFilterRow[]).filter(
+      (row) =>
+        isFormalSchoolCode(row.school_code) &&
+        recordMatchesTeacherAssignments(row, teacherAuth.assignments, teacherAuth.isSuperAdmin)
+    )
+    const schoolFilters = filtersFromSchoolRows(filterRows)
     const filters: FiltersResponse = {
-  schoolCodes: unique(filterRows.map((row) => row.school_code).filter(Boolean) as string[]).sort(),
-  grades: unique(filterRows.map((row) => row.grade).filter(Boolean) as string[]).sort(),
-  classNames: unique(filterRows.map((row) => row.class_name).filter(Boolean) as string[]).sort(),
-  userRoles: unique(studentRows.map((row) => row.userRole).filter(Boolean) as string[]).sort(),
-  useContexts: unique(studentRows.map((row) => row.useContext).filter(Boolean) as string[]).sort(),
-  animalClassificationExperiences: unique(
-    studentRows
-      .map((row) => row.animalClassificationExperience)
-      .filter(Boolean) as string[]
-  ).sort(),
-  stages: STAGE_KEYS,
-}
+      ...schoolFilters,
+      userRoles: uniqueSortedNonEmpty(studentRows.map((row) => row.userRole)),
+      useContexts: uniqueSortedNonEmpty(studentRows.map((row) => row.useContext)),
+      animalClassificationExperiences: uniqueSortedNonEmpty(
+        studentRows.map((row) => row.animalClassificationExperience)
+      ),
+    }
 
     const insightCards: InsightCard[] = []
 

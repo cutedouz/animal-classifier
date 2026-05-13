@@ -45,6 +45,12 @@ type IncomingEventLog = {
   clientTs?: string | null
 }
 
+function toRecord(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
 function normalizeItemLog(item: IncomingItemLog) {
   const selectedFeatures = Array.isArray(item.selectedFeatures)
     ? item.selectedFeatures.filter(
@@ -207,10 +213,11 @@ function dedupeItemLogs(items: IncomingItemLog[]) {
   return [...map.values()]
 }
 
-function getAnsweredTotal(payload: any) {
-  return Number(
-    payload?.dataQualityFlags?.completeness?.answeredTotalCount ?? 0
-  )
+function getAnsweredTotal(payload: unknown) {
+  const dataQualityFlags = toRecord(toRecord(payload)?.dataQualityFlags)
+  const completeness = toRecord(dataQualityFlags?.completeness)
+
+  return Number(completeness?.answeredTotalCount ?? 0)
 }
 
 function normalizeEventLog(event: IncomingEventLog) {

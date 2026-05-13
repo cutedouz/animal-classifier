@@ -50,9 +50,65 @@ function safeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function asNumber(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+function normalizeFilterValue(value: string | null | undefined) {
+  const normalized = value?.trim() ?? ''
+  if (!normalized) return ''
+  if (normalized === 'all') return ''
+  if (normalized === '全部學校') return ''
+  if (normalized === '全部年級') return ''
+  if (normalized === '全部班級') return ''
+  if (normalized === 'undefined') return ''
+  if (normalized === 'null') return ''
+  if (normalized === '[object Object]') return ''
+  return normalized
 }
+
+function emptyQualitativeSummary() {
+  return {
+    recordCount: 0,
+    itemLogCount: 0,
+    reasonCount: 0,
+    exclusionReasonCount: 0,
+    shortReasonRate: null,
+    missingExclusionRate: null,
+    surfaceReasonRate: null,
+    structuralReasonRate: null,
+    highConfidenceWrongReasonCount: 0,
+  }
+}
+
+function emptyQualitativePayload(extra: Record<string, unknown> = {}) {
+  return {
+    ok: true,
+    ...extra,
+    summary: emptyQualitativeSummary(),
+    patterns: [],
+    questionFocus: [],
+    examples: [],
+  }
+}
+
+function qualitativeQueryFallback(warning: string) {
+  return NextResponse.json(
+    emptyQualitativePayload({ warning }),
+    { status: 200 }
+  )
+}
+
+function supabaseErrorDetails(error: {
+  message?: string
+  code?: string
+  details?: string
+  hint?: string
+}) {
+  return {
+    message: error.message,
+    code: error.code,
+    details: error.details,
+    hint: error.hint,
+  }
+}
+
 
 function ratio(numerator: number, denominator: number) {
   return denominator > 0 ? numerator / denominator : null
@@ -62,12 +118,6 @@ function compactText(value: string | null | undefined, max = 90) {
   const text = safeString(value)
   if (!text) return ''
   return text.length > max ? `${text.slice(0, max)}…` : text
-}
-
-function stageLabelForInterpretation(stage: string) {
-  if (stage === 'evidence') return '帶提示判定'
-  if (stage === 'transfer') return '遷移應用'
-  return stage
 }
 
 function parsePayloadInfo(payload: JsonRecord | null) {
@@ -232,16 +282,27 @@ export async function GET(req: NextRequest) {
     }
 
     const searchParams = req.nextUrl.searchParams
-    const schoolCode = searchParams.get('schoolCode')?.trim() ?? ''
-    const grade = searchParams.get('grade')?.trim() ?? ''
-    const className = searchParams.get('className')?.trim() ?? ''
-    const participantCode = searchParams.get('participantCode')?.trim() ?? ''
-    const stageFilter = searchParams.get('currentStage')?.trim() ?? ''
+    const schoolCode = normalizeFilterValue(searchParams.get('schoolCode'))
+    const grade = normalizeFilterValue(searchParams.get('grade'))
+    const className = normalizeFilterValue(searchParams.get('className'))
+    const participantCode = normalizeFilterValue(searchParams.get('participantCode'))
+    const stageFilter = normalizeFilterValue(searchParams.get('currentStage'))
     const completedOnly = searchParams.get('completedOnly') === 'true'
-    const userRoleFilter = searchParams.get('userRole')?.trim() ?? ''
-    const useContextFilter = searchParams.get('useContext')?.trim() ?? ''
-    const animalExperienceFilter =
-      searchParams.get('animalClassificationExperience')?.trim() ?? ''
+    const userRoleFilter = normalizeFilterValue(searchParams.get('userRole'))
+    const useContextFilter = normalizeFilterValue(searchParams.get('useContext'))
+    const animalExperienceFilter = normalizeFilterValue(
+      searchParams.get('animalClassificationExperience')
+    )
+
+    if (!schoolCode && !grade && !className && !participantCode) {
+      return NextResponse.json(
+        emptyQualitativePayload({
+          requiresFilter: true,
+          message: '請先選擇學校、年級、班級或學生代碼後再載入質性分析。',
+        }),
+        { status: 200 }
+      )
+    }
 
     let recordQuery = admin
       .from('learning_records')
@@ -258,7 +319,8 @@ export async function GET(req: NextRequest) {
 
     const { data: records, error: recordError } = await recordQuery
     if (recordError) {
-      return NextResponse.json({ error: recordError.message }, { status: 500 })
+      console.error('teacher qualitative record query failed', supabaseErrorDetails(recordError))
+      return qualitativeQueryFallback('質性資料暫時無法載入，請先查看班級總覽與題目診斷。')
     }
 
     const filteredRecords = ((records ?? []) as LearningRecordRow[])
@@ -275,23 +337,7 @@ export async function GET(req: NextRequest) {
     const recordMap = new Map(filteredRecords.map((record) => [record.id, record]))
 
     if (recordIds.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        summary: {
-          recordCount: 0,
-          itemLogCount: 0,
-          reasonCount: 0,
-          exclusionReasonCount: 0,
-          shortReasonRate: null,
-          missingExclusionRate: null,
-          surfaceReasonRate: null,
-          structuralReasonRate: null,
-          highConfidenceWrongReasonCount: 0,
-        },
-        patterns: [],
-        questionFocus: [],
-        examples: [],
-      })
+      return NextResponse.json(emptyQualitativePayload())
     }
 
     const { data: itemLogs, error: itemError } = await admin
@@ -301,7 +347,8 @@ export async function GET(req: NextRequest) {
       .order('submitted_at', { ascending: false })
 
     if (itemError) {
-      return NextResponse.json({ error: itemError.message }, { status: 500 })
+      console.error('teacher qualitative item log query failed', supabaseErrorDetails(itemError))
+      return qualitativeQueryFallback('質性資料暫時無法載入，請先查看班級總覽與題目診斷。')
     }
 
     const joined: JoinedItemLog[] = ((itemLogs ?? []) as LearningItemLogRow[])
@@ -429,8 +476,10 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('teacher qualitative analysis error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : '質性資料分析失敗' },
-      { status: 500 }
+      emptyQualitativePayload({
+        warning: '質性資料暫時無法載入，請先查看班級總覽與題目診斷。',
+      }),
+      { status: 200 }
     )
   }
 }
