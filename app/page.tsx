@@ -22,6 +22,8 @@ import { scoreCriterionQuality } from '../lib/scoring'
 
 type AppStage = 'stage1' | 'reflection' | 'guide' | 'evidence' | 'transfer' | 'done'
 
+const PROGRESS_SAVE_DEBOUNCE_MS = 8000
+
 const SIX_PHYLA = [
   '刺絲胞動物門',
   '扁形動物門',
@@ -3831,7 +3833,7 @@ researchStageMapping: {
       } catch (error) {
         console.error('progress snapshot 儲存失敗:', error)
       }
-    }, 2000)
+    }, PROGRESS_SAVE_DEBOUNCE_MS)
 
     return () => {
       if (progressSaveTimerRef.current) {

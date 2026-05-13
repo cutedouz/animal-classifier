@@ -45,6 +45,29 @@ type IncomingEventLog = {
   clientTs?: string | null
 }
 
+type SupabaseErrorLike = {
+  message?: string
+  code?: string
+  details?: string
+  hint?: string
+}
+
+function logSupabaseError(context: string, error: SupabaseErrorLike) {
+  console.error(context, {
+    message: error.message ?? null,
+    code: error.code ?? null,
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+  })
+}
+
+function databaseWriteErrorResponse() {
+  return NextResponse.json(
+    { error: 'student-submit database write failed' },
+    { status: 500 }
+  )
+}
+
 function normalizeItemLog(item: IncomingItemLog) {
   const selectedFeatures = Array.isArray(item.selectedFeatures)
     ? item.selectedFeatures.filter(
@@ -207,10 +230,19 @@ function dedupeItemLogs(items: IncomingItemLog[]) {
   return [...map.values()]
 }
 
-function getAnsweredTotal(payload: any) {
-  return Number(
-    payload?.dataQualityFlags?.completeness?.answeredTotalCount ?? 0
-  )
+function getAnsweredTotal(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return 0
+
+  const dataQualityFlags = (payload as { dataQualityFlags?: unknown }).dataQualityFlags
+  if (!dataQualityFlags || typeof dataQualityFlags !== 'object') return 0
+
+  const completeness = (dataQualityFlags as { completeness?: unknown }).completeness
+  if (!completeness || typeof completeness !== 'object') return 0
+
+  const answeredTotalCount = (completeness as { answeredTotalCount?: unknown }).answeredTotalCount
+  return typeof answeredTotalCount === 'number' && Number.isFinite(answeredTotalCount)
+    ? answeredTotalCount
+    : 0
 }
 
 function normalizeEventLog(event: IncomingEventLog) {
@@ -310,7 +342,8 @@ export async function POST(req: Request) {
       .single()
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      logSupabaseError('learning_records upsert failed', error)
+      return databaseWriteErrorResponse()
     }
 
     if (!data?.id) {
@@ -318,6 +351,20 @@ export async function POST(req: Request) {
         { error: 'learning_records upsert succeeded but no record id returned' },
         { status: 500 }
       )
+    }
+
+    const shouldWriteNormalizedLogs =
+      isCompleted || saveMode === 'submit' || saveMode === 'final'
+
+    if (!shouldWriteNormalizedLogs) {
+      return NextResponse.json({
+        ok: true,
+        data,
+        saveMode,
+        itemLogCount: 0,
+        eventLogCount: 0,
+        skippedLogs: true,
+      })
     }
 
     const evidenceItemLogs = Array.isArray(payload?.evidenceItemLogs)
@@ -370,7 +417,8 @@ export async function POST(req: Request) {
       .eq('record_id', data.id)
 
     if (deleteItemError) {
-      return NextResponse.json({ error: deleteItemError.message }, { status: 500 })
+      logSupabaseError('learning_item_logs delete failed', deleteItemError)
+      return databaseWriteErrorResponse()
     }
 
     if (itemRows.length > 0) {
@@ -379,7 +427,8 @@ export async function POST(req: Request) {
         .insert(itemRows)
 
       if (insertItemError) {
-        return NextResponse.json({ error: insertItemError.message }, { status: 500 })
+        logSupabaseError('learning_item_logs insert failed', insertItemError)
+        return databaseWriteErrorResponse()
       }
     }
 
@@ -389,7 +438,8 @@ export async function POST(req: Request) {
       .eq('record_id', data.id)
 
     if (deleteEventError) {
-      return NextResponse.json({ error: deleteEventError.message }, { status: 500 })
+      logSupabaseError('learning_event_logs delete failed', deleteEventError)
+      return databaseWriteErrorResponse()
     }
 
     if (eventRows.length > 0) {
@@ -398,7 +448,8 @@ export async function POST(req: Request) {
         .insert(eventRows)
 
       if (insertEventError) {
-        return NextResponse.json({ error: insertEventError.message }, { status: 500 })
+        logSupabaseError('learning_event_logs insert failed', insertEventError)
+        return databaseWriteErrorResponse()
       }
     }
 
