@@ -187,6 +187,21 @@ function makeExample(item: JoinedItemLog, index: number) {
   }
 }
 
+
+function emptyQualitativeSummary() {
+  return {
+    recordCount: 0,
+    itemLogCount: 0,
+    reasonCount: 0,
+    exclusionReasonCount: 0,
+    shortReasonRate: null,
+    missingExclusionRate: null,
+    surfaceReasonRate: null,
+    structuralReasonRate: null,
+    highConfidenceWrongReasonCount: 0,
+  }
+}
+
 function pattern(
   key: string,
   label: string,
@@ -243,6 +258,22 @@ export async function GET(req: NextRequest) {
     const animalExperienceFilter =
       searchParams.get('animalClassificationExperience')?.trim() ?? ''
 
+    const hasRequiredDataFilter = Boolean(
+      schoolCode || grade || className || participantCode
+    )
+
+    if (!hasRequiredDataFilter) {
+      return NextResponse.json({
+        ok: true,
+        requiresFilter: true,
+        message: '請先選擇學校、年級、班級或學生代碼後再載入質性分析。',
+        summary: emptyQualitativeSummary(),
+        patterns: [],
+        questionFocus: [],
+        examples: [],
+      })
+    }
+
     let recordQuery = admin
       .from('learning_records')
       .select('id, participant_code, school_code, grade, class_name, seat_no, masked_name, current_stage, is_completed, payload, updated_at')
@@ -277,17 +308,7 @@ export async function GET(req: NextRequest) {
     if (recordIds.length === 0) {
       return NextResponse.json({
         ok: true,
-        summary: {
-          recordCount: 0,
-          itemLogCount: 0,
-          reasonCount: 0,
-          exclusionReasonCount: 0,
-          shortReasonRate: null,
-          missingExclusionRate: null,
-          surfaceReasonRate: null,
-          structuralReasonRate: null,
-          highConfidenceWrongReasonCount: 0,
-        },
+        summary: emptyQualitativeSummary(),
         patterns: [],
         questionFocus: [],
         examples: [],

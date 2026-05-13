@@ -662,6 +662,59 @@ function pickTopCounts(map: Record<string, number>, limit = 3) {
     .map(([key]) => key)
 }
 
+
+function emptySummary(): Summary {
+  return {
+    totalStudents: 0,
+    completedStudents: 0,
+    completionRate: null,
+    evidenceAccuracy: null,
+    transferAccuracy: null,
+    sdi: null,
+    avgEvidenceDurationSec: null,
+    avgTransferDurationSec: null,
+    medianEvidenceDurationSec: null,
+    medianTransferDurationSec: null,
+    zoomUserRate: null,
+    avgStructuralFeatureRate: null,
+    avgReasonCharCount: null,
+  }
+}
+
+function emptySampleBases(): SampleBases {
+  return {
+    totalStudents: 0,
+    completedStudents: 0,
+    evidenceStudents: 0,
+    evidenceItems: 0,
+    transferStudents: 0,
+    transferItems: 0,
+    zoomStudents: 0,
+    zoomEvents: 0,
+    awarenessStudents: 0,
+  }
+}
+
+function emptyFilters(): FiltersResponse {
+  return {
+    schoolCodes: [],
+    grades: [],
+    classNames: [],
+    userRoles: [],
+    useContexts: [],
+    animalClassificationExperiences: [],
+    stages: STAGE_KEYS,
+  }
+}
+
+function emptyCounts() {
+  return {
+    records: 0,
+    itemLogs: 0,
+    eventLogs: 0,
+  }
+}
+
 function denominatorWarning(label: string, count: number, total: number): SampleWarning | null {
   if (count === 0) {
     return { key: label, level: 'warn', message: `${label}目前沒有有效樣本，請先看完成度與進度，不宜下教學定論。` }
@@ -711,6 +764,40 @@ export async function GET(req: NextRequest) {
       searchParams.get('animalClassificationExperience')?.trim() ?? ''
     const completedOnly = searchParams.get('completedOnly') === 'true'
     const riskOnly = searchParams.get('riskOnly') === 'true'
+
+    const hasRequiredDataFilter = Boolean(
+      schoolCode || grade || className || participantCode
+    )
+
+    if (!hasRequiredDataFilter) {
+      return NextResponse.json({
+        ok: true,
+        requiresFilter: true,
+        message: '請先選擇學校、年級、班級或學生代碼後再載入教師儀表板。',
+        filters: emptyFilters(),
+        summary: emptySummary(),
+        sampleBases: emptySampleBases(),
+        sampleWarnings: [],
+        stageFunnel: [],
+        riskDistribution: [],
+        studentRows: [],
+        highRiskStudents: [],
+        strongestStudents: [],
+        questionMetrics: [],
+        featureMetrics: [],
+        misconceptionMetrics: [],
+        featureQualitySummary: {
+          high: 0,
+          partial: 0,
+          surfaceOrMisleading: 0,
+          unclear: 0,
+        },
+        averagePrimaryHitCount: 0,
+        averageMisleadingHitCount: 0,
+        insightCards: [],
+        counts: emptyCounts(),
+      })
+    }
 
     let recordQuery = admin
       .from('learning_records')
@@ -1176,7 +1263,7 @@ for (const item of enrichedItems.filter((row) => row.is_correct === false)) {
       .sort((a, b) => (b.transferAccuracy ?? 0) - (a.transferAccuracy ?? 0))
       .slice(0, 10)
 
-    const filterRows = (filterValuesResponse.data ?? []).filter((row: any) => recordMatchesTeacherAssignments(row, teacherAuth.assignments)) as Array<{ school_code: string | null; grade: string | null; class_name: string | null }>
+    const filterRows = ((filterValuesResponse.data ?? []) as Array<{ school_code: string | null; grade: string | null; class_name: string | null }>).filter((row) => recordMatchesTeacherAssignments(row, teacherAuth.assignments, teacherAuth.isSuperAdmin))
     const filters: FiltersResponse = {
   schoolCodes: unique(filterRows.map((row) => row.school_code).filter(Boolean) as string[]).sort(),
   grades: unique(filterRows.map((row) => row.grade).filter(Boolean) as string[]).sort(),
