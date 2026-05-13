@@ -450,6 +450,16 @@ function unique<T>(values: T[]) {
   return [...new Set(values)]
 }
 
+function isFormalSchoolCode(value: string | null | undefined) {
+  const school = value?.trim()
+  if (!school) return false
+  if (school.startsWith('manual:')) return false
+  if (school === 'demo-school') return false
+  if (school.includes('測試')) return false
+  if (school.toLowerCase().includes('test')) return false
+  return true
+}
+
 function uniqueSortedNonEmpty(values: Array<string | null | undefined>) {
   return unique(
     values
@@ -498,11 +508,19 @@ function emptyCounts() {
   }
 }
 
-function filtersFromAssignments(assignments: TeacherAssignment[]): FiltersResponse {
+type SchoolFilterRow = {
+  school_code: string | null
+  grade: string | null
+  class_name: string | null
+}
+
+function filtersFromSchoolRows(rows: SchoolFilterRow[]): FiltersResponse {
+  const formalRows = rows.filter((row) => isFormalSchoolCode(row.school_code))
+
   return {
-    schoolCodes: uniqueSortedNonEmpty(assignments.map((assignment) => assignment.school_code)),
-    grades: uniqueSortedNonEmpty(assignments.map((assignment) => assignment.grade)),
-    classNames: uniqueSortedNonEmpty(assignments.map((assignment) => assignment.class_name)),
+    schoolCodes: uniqueSortedNonEmpty(formalRows.map((row) => row.school_code)),
+    grades: uniqueSortedNonEmpty(formalRows.map((row) => row.grade)),
+    classNames: uniqueSortedNonEmpty(formalRows.map((row) => row.class_name)),
     userRoles: [],
     useContexts: [],
     animalClassificationExperiences: [],
@@ -510,42 +528,46 @@ function filtersFromAssignments(assignments: TeacherAssignment[]): FiltersRespon
   }
 }
 
+function filtersFromAssignments(assignments: TeacherAssignment[]): FiltersResponse {
+  return filtersFromSchoolRows(assignments)
+}
+
 async function loadInitialFilters(
   admin: SupabaseClient,
   teacherAuth: TeacherAuth
 ): Promise<FiltersResponse> {
-  if (teacherAuth.assignments.length > 0) {
+  if (!teacherAuth.isSuperAdmin) {
     return filtersFromAssignments(teacherAuth.assignments)
   }
 
-  if (!teacherAuth.isSuperAdmin) {
-    return filtersFromAssignments([])
+  const { data: assignmentRows, error: assignmentError } = await admin
+    .from('teacher_class_assignments')
+    .select('school_code, grade, class_name')
+    .eq('is_active', true)
+
+  if (assignmentError) {
+    throw new Error(assignmentError.message)
   }
 
-  const { data, error } = await admin
+  const { data: recordRows, error: recordError } = await admin
     .from('learning_records')
     .select('school_code, grade, class_name')
+    .not('school_code', 'is', null)
+    .not('school_code', 'ilike', 'manual:%')
+    .neq('school_code', 'demo-school')
+    .not('school_code', 'ilike', '%測試%')
+    .not('school_code', 'ilike', '%test%')
+    .order('updated_at', { ascending: false })
     .range(0, 4999)
 
-  if (error) {
-    throw new Error(error.message)
+  if (recordError) {
+    throw new Error(recordError.message)
   }
 
-  const rows = (data ?? []) as Array<{
-    school_code: string | null
-    grade: string | null
-    class_name: string | null
-  }>
-
-  return {
-    schoolCodes: uniqueSortedNonEmpty(rows.map((row) => row.school_code)),
-    grades: uniqueSortedNonEmpty(rows.map((row) => row.grade)),
-    classNames: uniqueSortedNonEmpty(rows.map((row) => row.class_name)),
-    userRoles: [],
-    useContexts: [],
-    animalClassificationExperiences: [],
-    stages: STAGE_KEYS,
-  }
+  return filtersFromSchoolRows([
+    ...((assignmentRows ?? []) as SchoolFilterRow[]),
+    ...((recordRows ?? []) as SchoolFilterRow[]),
+  ])
 }
 
 function normalizeFeatureName(feature: unknown) {
@@ -1305,19 +1327,19 @@ for (const item of enrichedItems.filter((row) => row.is_correct === false)) {
       .sort((a, b) => (b.transferAccuracy ?? 0) - (a.transferAccuracy ?? 0))
       .slice(0, 10)
 
-    const filterRows = (filterValuesResponse.data ?? []).filter((row) =>
-      recordMatchesTeacherAssignments(row, teacherAuth.assignments, teacherAuth.isSuperAdmin)
-    ) as Array<{ school_code: string | null; grade: string | null; class_name: string | null }>
+    const filterRows = ((filterValuesResponse.data ?? []) as SchoolFilterRow[]).filter(
+      (row) =>
+        isFormalSchoolCode(row.school_code) &&
+        recordMatchesTeacherAssignments(row, teacherAuth.assignments, teacherAuth.isSuperAdmin)
+    )
+    const schoolFilters = filtersFromSchoolRows(filterRows)
     const filters: FiltersResponse = {
-      schoolCodes: uniqueSortedNonEmpty(filterRows.map((row) => row.school_code)),
-      grades: uniqueSortedNonEmpty(filterRows.map((row) => row.grade)),
-      classNames: uniqueSortedNonEmpty(filterRows.map((row) => row.class_name)),
+      ...schoolFilters,
       userRoles: uniqueSortedNonEmpty(studentRows.map((row) => row.userRole)),
       useContexts: uniqueSortedNonEmpty(studentRows.map((row) => row.useContext)),
       animalClassificationExperiences: uniqueSortedNonEmpty(
         studentRows.map((row) => row.animalClassificationExperience)
       ),
-      stages: STAGE_KEYS,
     }
 
     const insightCards: InsightCard[] = []
