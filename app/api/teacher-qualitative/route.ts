@@ -255,6 +255,70 @@ function pattern(
   }
 }
 
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+async function fetchRowsByRecordIds<T>(
+  admin: any,
+  tableName: string,
+  selectColumns: string,
+  recordIds: string[],
+  options?: {
+    chunkSize?: number
+    orderColumn?: string
+    ascending?: boolean
+  }
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  if (recordIds.length === 0) {
+    return { data: [], error: null }
+  }
+
+  const chunkSize = options?.chunkSize ?? 80
+  const chunks = chunkArray(recordIds, chunkSize)
+  const allRows: T[] = []
+
+  for (const chunk of chunks) {
+    let query = admin
+      .from(tableName)
+      .select(selectColumns)
+      .in('record_id', chunk)
+
+    if (options?.orderColumn) {
+      query = query.order(options.orderColumn, {
+        ascending: options.ascending ?? true,
+      })
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      return { data: allRows, error }
+    }
+
+    allRows.push(...((data ?? []) as T[]))
+  }
+
+  if (options?.orderColumn) {
+    const key = options.orderColumn
+    const ascending = options.ascending ?? true
+
+    allRows.sort((a: any, b: any) => {
+      const rawA = a?.[key]
+      const rawB = b?.[key]
+      const timeA = rawA ? new Date(String(rawA)).getTime() : 0
+      const timeB = rawB ? new Date(String(rawB)).getTime() : 0
+      return ascending ? timeA - timeB : timeB - timeA
+    })
+  }
+
+  return { data: allRows, error: null }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -340,11 +404,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(emptyQualitativePayload())
     }
 
-    const { data: itemLogs, error: itemError } = await admin
-      .from('latest_learning_item_logs')
-      .select('record_id, participant_code, stage, question_id, animal_name, submitted_at, final_answer, primary_feature, reason_text, reason_char_count, exclusion_reason_text, exclusion_reason_char_count, confidence, is_correct, criterion_quality, high_confidence_error')
-      .in('record_id', recordIds)
-      .order('submitted_at', { ascending: false })
+    const itemLogSelectColumns =
+      'record_id, participant_code, stage, question_id, animal_name, submitted_at, final_answer, primary_feature, reason_text, reason_char_count, exclusion_reason_text, exclusion_reason_char_count, confidence, is_correct, criterion_quality, high_confidence_error'
+
+    const { data: itemLogs, error: itemError } =
+      await fetchRowsByRecordIds<LearningItemLogRow>(
+        admin,
+        'latest_learning_item_logs',
+        itemLogSelectColumns,
+        recordIds,
+        {
+          chunkSize: 80,
+          orderColumn: 'submitted_at',
+          ascending: false,
+        }
+      )
 
     if (itemError) {
       console.error('teacher qualitative item log query failed', supabaseErrorDetails(itemError))

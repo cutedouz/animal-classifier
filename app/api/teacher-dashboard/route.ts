@@ -778,6 +778,54 @@ function buildRiskLevel(student: Omit<StudentRow, 'riskLevel'>): StudentRow['ris
   return '低'
 }
 
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+async function fetchRowsByRecordIds<T>(
+  admin: any,
+  tableName: string,
+  selectColumns: string,
+  recordIds: string[],
+  options?: {
+    eventTypes?: string[]
+    chunkSize?: number
+  }
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  if (recordIds.length === 0) {
+    return { data: [], error: null }
+  }
+
+  const chunkSize = options?.chunkSize ?? 80
+  const chunks = chunkArray(recordIds, chunkSize)
+  const allRows: T[] = []
+
+  for (const chunk of chunks) {
+    let query = admin
+      .from(tableName)
+      .select(selectColumns)
+      .in('record_id', chunk)
+
+    if (options?.eventTypes?.length) {
+      query = query.in('event_type', options.eventTypes)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      return { data: allRows, error }
+    }
+
+    allRows.push(...((data ?? []) as T[]))
+  }
+
+  return { data: allRows, error: null }
+}
+
 function pickTopCounts(map: Record<string, number>, limit = 3) {
   return Object.entries(map)
     .sort((a, b) => b[1] - a[1])
@@ -881,29 +929,100 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: recordError.message }, { status: 500 })
     }
 
-    const recordRows = ((records ?? []) as LearningRecordRow[]).filter((record) =>
+    const rawRecords = (records ?? []) as LearningRecordRow[]
+
+    const recordRows = rawRecords.filter((record) =>
       recordMatchesTeacherAssignments(record, teacherAuth.assignments, teacherAuth.isSuperAdmin)
     )
+
     const allRecordIds = recordRows.map((record) => record.id)
+
+    const debugDashboard =
+      process.env.NODE_ENV !== 'production' &&
+      searchParams.get('debug') === 'true'
+
+    if (debugDashboard) {
+      return NextResponse.json({
+        ok: true,
+        debug: {
+          teacher: {
+            id: teacherAuth.teacher.id,
+            displayName: teacherAuth.teacher.displayName,
+            isSuperAdmin: teacherAuth.isSuperAdmin,
+            assignmentCount: teacherAuth.assignments.length,
+            assignments: teacherAuth.assignments.slice(0, 20),
+          },
+          filters: {
+            schoolCode,
+            grade,
+            className,
+            participantCode,
+            stageFilter,
+            userRoleFilter,
+            useContextFilter,
+            animalClassificationExperienceFilter,
+            completedOnly,
+            riskOnly,
+          },
+          counts: {
+            rawRecordsBeforeAuthFilter: rawRecords.length,
+            recordsAfterAuthFilter: recordRows.length,
+            allRecordIds: allRecordIds.length,
+          },
+          sampleRawRecords: rawRecords.slice(0, 10).map((record) => ({
+            id: record.id,
+            participant_code: record.participant_code,
+            school_code: record.school_code,
+            grade: record.grade,
+            class_name: record.class_name,
+            current_stage: record.current_stage,
+            is_completed: record.is_completed,
+            updated_at: record.updated_at,
+          })),
+          sampleFilteredRecords: recordRows.slice(0, 10).map((record) => ({
+            id: record.id,
+            participant_code: record.participant_code,
+            school_code: record.school_code,
+            grade: record.grade,
+            class_name: record.class_name,
+            current_stage: record.current_stage,
+            is_completed: record.is_completed,
+            updated_at: record.updated_at,
+          })),
+        },
+      })
+    }
+
+    const itemLogSelectColumns =
+      'record_id, participant_code, stage, question_id, animal_name, entered_at, submitted_at, duration_ms, final_answer, selected_features, selected_features_count, feature_selection_order, primary_feature, secondary_features, feature_options_shown, feature_option_order, random_seed, max_selectable_features, feature_option_version, reason_text, reason_char_count, exclusion_reason_text, exclusion_reason_char_count, confidence, familiarity, learned_before, is_correct, criterion_quality, diagnostic_hit_count, acceptable_hit_count, auxiliary_count, misleading_count, high_confidence_error, scoring_rubric_version'
+
+    const eventLogSelectColumns =
+      'record_id, participant_code, stage, question_id, event_type, event_value, client_ts, server_ts'
 
     const [filterValuesResponse, itemLogsResponse, eventLogsResponse] = await Promise.all([
       admin.from('learning_records').select('school_code, grade, class_name').range(0, 2999),
-      allRecordIds.length > 0
-        ? admin
-// Use latest_learning_item_logs for teacher-facing diagnostics to avoid
-    // double-counting repeated submissions from the same participant/stage/item.
-    // Raw learning_item_logs remains the append-only history table.
-                .from('latest_learning_item_logs')
-            .select('record_id, participant_code, stage, question_id, animal_name, entered_at, submitted_at, duration_ms, final_answer, selected_features, selected_features_count, feature_selection_order, primary_feature, secondary_features, feature_options_shown, feature_option_order, random_seed, max_selectable_features, feature_option_version, reason_text, reason_char_count, exclusion_reason_text, exclusion_reason_char_count, confidence, familiarity, learned_before, is_correct, criterion_quality, diagnostic_hit_count, acceptable_hit_count, auxiliary_count, misleading_count, high_confidence_error, scoring_rubric_version')
-            .in('record_id', allRecordIds)
-        : Promise.resolve({ data: [], error: null }),
-      allRecordIds.length > 0
-        ? admin
-            .from('learning_event_logs')
-            .select('record_id, participant_code, stage, question_id, event_type, event_value, client_ts, server_ts')
-            .in('record_id', allRecordIds)
-            .in('event_type', ['image_zoom_open', 'image_zoom_close'])
-        : Promise.resolve({ data: [], error: null }),
+
+      // Use latest_learning_item_logs for teacher-facing diagnostics to avoid
+      // double-counting repeated submissions from the same participant/stage/item.
+      // Raw learning_item_logs remains the append-only history table.
+      fetchRowsByRecordIds<LearningItemLogRow>(
+        admin,
+        'latest_learning_item_logs',
+        itemLogSelectColumns,
+        allRecordIds,
+        { chunkSize: 80 }
+      ),
+
+      fetchRowsByRecordIds<LearningEventLogRow>(
+        admin,
+        'learning_event_logs',
+        eventLogSelectColumns,
+        allRecordIds,
+        {
+          eventTypes: ['image_zoom_open', 'image_zoom_close'],
+          chunkSize: 80,
+        }
+      ),
     ])
 
     if (filterValuesResponse.error) {

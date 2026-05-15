@@ -1143,7 +1143,7 @@ export default function TeacherDecisionPage() {
                 </div>
               ) : null}
               <div>目前篩選後學生數：<span className="font-bold text-gray-900">{data?.summary.totalStudents ?? "—"}</span></div>
-              <div>learning_records：{data?.counts.records ?? "—"}｜item_logs：{data?.counts.itemLogs ?? "—"}｜event_logs：{data?.counts.eventLogs ?? "—"}</div>
+              <div>learning_records：{data?.counts.records ?? "—"}｜latest_learning_item_logs：{data?.counts.itemLogs ?? "—"}｜learning_event_logs：{data?.counts.eventLogs ?? "—"}</div>
               <div className="mt-2 text-xs leading-5 text-amber-700">若樣本偏少，請先看完成度與進度，不宜直接下全班結論。</div>
             </div>
           </div>
