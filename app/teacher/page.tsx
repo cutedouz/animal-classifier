@@ -140,6 +140,7 @@ type SampleWarning = {
 }
 
 type DashboardResponse = {
+  requiresFilter?: boolean
   ok: true
   teacher?: {
     id: string
@@ -1142,9 +1143,23 @@ export default function TeacherDecisionPage() {
                   </div>
                 </div>
               ) : null}
-              <div>目前篩選後學生數：<span className="font-bold text-gray-900">{data?.summary.totalStudents ?? "—"}</span></div>
-              <div>learning_records：{data?.counts.records ?? "—"}｜latest_learning_item_logs：{data?.counts.itemLogs ?? "—"}｜learning_event_logs：{data?.counts.eventLogs ?? "—"}</div>
-              <div className="mt-2 text-xs leading-5 text-amber-700">若樣本偏少，請先看完成度與進度，不宜直接下全班結論。</div>
+              {data?.requiresFilter ? (
+                <div className="space-y-2">
+                  <div>
+                    目前狀態：
+                    <span className="font-bold text-gray-900">尚未選擇篩選條件</span>
+                  </div>
+                  <div className="text-xs leading-5 text-amber-700">
+                    你目前使用 super user 權限。為避免全站題目紀錄查詢過慢，系統不會預設載入所有學生細部資料。請先選擇學校、年級或班級，再查看參與學生數、核心完成率與題目診斷。
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>目前篩選後進入紀錄數：<span className="font-bold text-gray-900">{data?.summary.totalStudents ?? "—"}</span></div>
+                  <div>learning_records：{data?.counts.records ?? "—"}｜latest_learning_item_logs：{data?.counts.itemLogs ?? "—"}｜learning_event_logs：{data?.counts.eventLogs ?? "—"}</div>
+                  <div className="mt-2 text-xs leading-5 text-amber-700">若樣本偏少，請先看完成度與進度，不宜直接下全班結論。</div>
+                </>
+              )}
             </div>
           </div>
         </section>
