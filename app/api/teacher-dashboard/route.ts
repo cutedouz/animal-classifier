@@ -234,9 +234,24 @@ type FiltersResponse = {
   stages: string[]
 }
 
+type GlobalOverview = {
+  totalRecords: number
+  completedRecords: number
+  stage1Records: number
+  evidenceStageRecords: number
+  transferStageRecords: number
+  doneRecords: number
+  candidateFormalRecords: number
+  excludedManualRecords: number
+  excludedDemoRecords: number
+  reviewNonGrade7Records: number
+  latestUpdate: string | null
+}
+
 type DashboardResponse = {
   ok: true
-  requiresFilter?: true
+  requiresFilter?: boolean
+  globalOverview?: GlobalOverview
   filters: FiltersResponse
   summary: Summary
   sampleBases: SampleBases
@@ -833,6 +848,76 @@ function pickTopCounts(map: Record<string, number>, limit = 3) {
     .map(([key]) => key)
 }
 
+async function buildGlobalOverview(admin: any): Promise<GlobalOverview> {
+  const { data, error } = await admin
+    .from('learning_records')
+    .select('school_code, grade, class_name, current_stage, is_completed, updated_at')
+    .order('updated_at', { ascending: false })
+    .range(0, 4999)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  const rows = (data ?? []) as Array<{
+    school_code: string | null
+    grade: string | null
+    class_name: string | null
+    current_stage: string | null
+    is_completed: boolean | null
+    updated_at: string | null
+  }>
+
+  let candidateFormalRecords = 0
+  let excludedManualRecords = 0
+  let excludedDemoRecords = 0
+  let reviewNonGrade7Records = 0
+
+  for (const row of rows) {
+    const schoolCode = String(row.school_code ?? '')
+    const grade = String(row.grade ?? '')
+
+    const isManual = schoolCode.startsWith('manual:')
+    const isDemo = schoolCode === 'demo-school'
+    const isTestLike = schoolCode.includes('測試') || schoolCode.includes('@@@@')
+
+    if (isManual) {
+      excludedManualRecords += 1
+      continue
+    }
+
+    if (isDemo) {
+      excludedDemoRecords += 1
+      continue
+    }
+
+    if (isTestLike) {
+      excludedDemoRecords += 1
+      continue
+    }
+
+    if (grade === '7') {
+      candidateFormalRecords += 1
+    } else {
+      reviewNonGrade7Records += 1
+    }
+  }
+
+  return {
+    totalRecords: rows.length,
+    completedRecords: rows.filter((row) => row.is_completed === true).length,
+    stage1Records: rows.filter((row) => row.current_stage === 'stage1').length,
+    evidenceStageRecords: rows.filter((row) => row.current_stage === 'evidence').length,
+    transferStageRecords: rows.filter((row) => row.current_stage === 'transfer').length,
+    doneRecords: rows.filter((row) => row.current_stage === 'done').length,
+    candidateFormalRecords,
+    excludedManualRecords,
+    excludedDemoRecords,
+    reviewNonGrade7Records,
+    latestUpdate: rows[0]?.updated_at ?? null,
+  }
+}
+
 function denominatorWarning(label: string, count: number, total: number): SampleWarning | null {
   if (count === 0) {
     return { key: label, level: 'warn', message: `${label}目前沒有有效樣本，請先看完成度與進度，不宜下教學定論。` }
@@ -891,6 +976,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         requiresFilter: true,
+        globalOverview: await buildGlobalOverview(admin),
         filters: initialFilters,
         summary: emptySummary(),
         sampleBases: emptySampleBases(),

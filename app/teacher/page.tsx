@@ -139,9 +139,24 @@ type SampleWarning = {
   message: string
 }
 
+type GlobalOverview = {
+  totalRecords: number
+  completedRecords: number
+  stage1Records: number
+  evidenceStageRecords: number
+  transferStageRecords: number
+  doneRecords: number
+  candidateFormalRecords: number
+  excludedManualRecords: number
+  excludedDemoRecords: number
+  reviewNonGrade7Records: number
+  latestUpdate: string | null
+}
+
 type DashboardResponse = {
-  requiresFilter?: boolean
   ok: true
+  requiresFilter?: boolean
+  globalOverview?: GlobalOverview
   teacher?: {
     id: string
     username: string | null
@@ -1144,13 +1159,35 @@ export default function TeacherDecisionPage() {
                 </div>
               ) : null}
               {data?.requiresFilter ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div>
                     目前狀態：
                     <span className="font-bold text-gray-900">尚未選擇篩選條件</span>
                   </div>
+
+                  {data.globalOverview ? (
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl border border-gray-200 bg-white p-2">
+                        <div className="text-gray-500">全站進入紀錄</div>
+                        <div className="text-lg font-black text-gray-900">{data.globalOverview.totalRecords}</div>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-white p-2">
+                        <div className="text-gray-500">候選正式七年級</div>
+                        <div className="text-lg font-black text-gray-900">{data.globalOverview.candidateFormalRecords}</div>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-white p-2">
+                        <div className="text-gray-500">已完成全流程</div>
+                        <div className="text-lg font-black text-gray-900">{data.globalOverview.completedRecords}</div>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-white p-2">
+                        <div className="text-gray-500">停在第 1 階段</div>
+                        <div className="text-lg font-black text-gray-900">{data.globalOverview.stage1Records}</div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="text-xs leading-5 text-amber-700">
-                    你目前使用 super user 權限。為避免全站題目紀錄查詢過慢，系統不會預設載入所有學生細部資料。請先選擇學校、年級或班級，再查看參與學生數、核心完成率與題目診斷。
+                    上方為全站輕量概況，只依 learning_records 估算，尚未排除重複作答與未對應正式名單者。為避免查詢過慢，系統不會預設載入所有題目紀錄；請先選擇學校、年級或班級，再查看參與學生數、核心完成率與題目診斷。
                   </div>
                 </div>
               ) : (
